@@ -1,0 +1,15 @@
+[Unit]
+Description=Intercom Backend Service
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/intercom-backend
+ExecStart=/usr/bin/node /opt/intercom-backend/dist/index.js
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
