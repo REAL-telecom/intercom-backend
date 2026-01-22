@@ -62,9 +62,11 @@ apt-get install -y build-essential \
   wget \
   ca-certificates \
   curl \
-  gnupg \
-  nodejs \
-  npm
+  gnupg
+
+echo "== Установка Node.js (LTS 24.x) =="
+curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
+apt-get install -y nodejs
 
 echo "== Установка Docker =="
 install -m 0755 -d /etc/apt/keyrings
