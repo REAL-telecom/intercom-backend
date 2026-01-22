@@ -19,6 +19,7 @@ ReadWritePaths=/var/lib/asterisk
 ReadWritePaths=/var/spool/asterisk
 ReadWritePaths=/var/run/asterisk
 ReadWritePaths=/var/log/asterisk
+ReadWritePaths=/var/cache/asterisk
 ProtectHome=yes
 PrivateTmp=true
 ProtectKernelTunables=yes

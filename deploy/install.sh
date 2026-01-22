@@ -88,6 +88,7 @@ make menuselect/menuselect
 make menuselect-tree
 ./menuselect/menuselect \
   --enable codec_opus \
+  --enable res_config_pgsql \
   --disable CORE-SOUNDS-EN-GSM \
   --enable CORE-SOUNDS-EN-WAV \
   --enable CORE-SOUNDS-RU-WAV \
@@ -100,8 +101,8 @@ if ! id asterisk >/dev/null 2>&1; then
   useradd -r -d /var/lib/asterisk -g asterisk asterisk
 fi
 
-mkdir -p /var/{lib,log,run,spool}/asterisk
-chown -R asterisk:asterisk /var/{lib,log,run,spool}/asterisk
+mkdir -p /var/{lib,log,run,spool,cache}/asterisk
+chown -R asterisk:asterisk /var/{lib,log,run,spool,cache}/asterisk
 chown -R asterisk:asterisk /etc/asterisk
 
 echo "== Копирование конфигураций Asterisk =="
