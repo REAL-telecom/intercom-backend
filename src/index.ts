@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import dotenv from "dotenv";
+import sensible from "@fastify/sensible";
 import { env } from "./config/env";
 import { ensureSchema, ensureUser } from "./store/postgres";
 import { registerPushRoutes } from "./routes/push";
@@ -24,6 +25,7 @@ const config = {
 };
 
 const app = Fastify({ logger: true });
+app.register(sensible);
 
 ensureSchema()
   .then(() => ensureUser(env.realphone))
@@ -97,7 +99,7 @@ connectAriEvents(async (event) => {
       }
 
       await sendExpoPush(
-        tokens.map((token) => ({
+        tokens.map((token: string) => ({
           to: token,
           title: "Звонок в домофон",
           body: "Кто-то стоит у двери",

@@ -127,7 +127,7 @@ export const listPushTokens = async (userId: string) => {
     `SELECT expo_push_token FROM push_tokens WHERE user_id = $1`,
     [userId]
   );
-  return result.rows.map((row) => row.expo_push_token as string);
+  return result.rows.map((row: { expo_push_token: string }) => row.expo_push_token);
 };
 
 /**

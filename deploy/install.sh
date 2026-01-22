@@ -67,6 +67,8 @@ apt-get install -y build-essential \
 echo "== Установка Node.js (LTS 24.x) =="
 curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
 apt-get install -y nodejs
+echo "== Обновление npm до последней версии =="
+npm install -g npm@latest
 
 echo "== Установка Docker =="
 install -m 0755 -d /etc/apt/keyrings

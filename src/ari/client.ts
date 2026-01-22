@@ -1,4 +1,4 @@
-import WebSocket from "ws";
+import WebSocket, { RawData } from "ws";
 import { env } from "../config/env";
 
 type AriEvent = {
@@ -7,6 +7,10 @@ type AriEvent = {
 };
 
 type AriEventHandler = (event: AriEvent) => void;
+
+type AriBridge = {
+  id: string;
+};
 
 /**
  * Build ARI REST base URL with basic auth.
@@ -32,7 +36,7 @@ const buildWsUrl = () => {
 export const connectAriEvents = (onEvent: AriEventHandler) => {
   const ws = new WebSocket(buildWsUrl());
 
-  ws.on("message", (data) => {
+  ws.on("message", (data: RawData) => {
     try {
       const event = JSON.parse(data.toString()) as AriEvent;
       onEvent(event);
@@ -47,26 +51,29 @@ export const connectAriEvents = (onEvent: AriEventHandler) => {
 /**
  * Perform ARI REST request.
  */
-const request = async (path: string, method = "GET", body?: unknown) => {
-  const res = await fetch(`${buildBaseUrl()}${path}`, {
+const request = async <T = unknown>(path: string, method = "GET", body?: unknown) => {
+  const init: RequestInit = {
     method,
     headers: {
       "Content-Type": "application/json",
     },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  };
+  if (body !== undefined) {
+    init.body = JSON.stringify(body);
+  }
+  const res = await fetch(`${buildBaseUrl()}${path}`, init);
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`ARI request failed: ${res.status} ${text}`);
   }
-  return res.json();
+  return res.json() as Promise<T>;
 };
 
 /**
  * Create mixing bridge for call.
  */
 export const createBridge = async () => {
-  return request("/bridges", "POST", { type: "mixing" });
+  return request<AriBridge>("/bridges", "POST", { type: "mixing" });
 };
 
 /**

@@ -19,7 +19,10 @@ export const registerPushRoutes = async (app: FastifyInstance) => {
       return app.httpErrors.badRequest("Missing required fields");
     }
 
-    await savePushToken({ userId, expoPushToken, platform, deviceId });
+    const payload = deviceId
+      ? { userId, expoPushToken, platform, deviceId }
+      : { userId, expoPushToken, platform };
+    await savePushToken(payload);
     return { ok: true };
   });
 };
