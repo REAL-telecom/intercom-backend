@@ -11,15 +11,19 @@ type ExpoMessage = {
 
 /**
  * Send push messages via Expo Push API.
- * Requires EXPO_ACCESS_TOKEN in env.
+ * EXPO_ACCESS_TOKEN is optional - if empty, sends without auth (lower reliability).
  */
 export const sendExpoPush = async (messages: ExpoMessage[]) => {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (env.expoAccessToken) {
+    headers.Authorization = `Bearer ${env.expoAccessToken}`;
+  }
+
   const res = await fetch("https://exp.host/--/api/v2/push/send", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${env.expoAccessToken}`,
-    },
+    headers,
     body: JSON.stringify(messages),
   });
 

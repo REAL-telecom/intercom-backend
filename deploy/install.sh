@@ -37,7 +37,6 @@ require_var TURN_PASSWORD
 require_var POSTGRES_DB
 require_var POSTGRES_USER
 require_var POSTGRES_PASSWORD
-require_var EXPO_ACCESS_TOKEN
 
 echo "== Обновление ОС и установка зависимостей =="
 apt-get update -y
@@ -61,10 +60,19 @@ apt-get install -y build-essential \
   pkg-config \
   uuid-dev \
   wget \
-  docker.io \
-  docker-compose-plugin \
+  ca-certificates \
+  curl \
+  gnupg \
   nodejs \
   npm
+
+echo "== Установка Docker =="
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+chmod a+r /etc/apt/keyrings/docker.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+apt-get update -y
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 echo "== Запуск Docker =="
 systemctl enable docker

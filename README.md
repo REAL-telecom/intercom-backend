@@ -13,15 +13,10 @@
    git clone https://github.com/REAL-telecom/intercom-backend
    cd intercom-backend
    ```
-2. Скопируйте `env.example` в `.env` и заполните значения.
-   Можно скопировать файл на сервер через `scp`:
+2. Создайте файл `.env` на основе `env.example` и заполните значения.
+3. Установите права на выполнение и запустите установку:
    ```bash
-   # В окне терминала выполните команду:
-   scp -i [путь до файла публичного ключа] .env \
-       [пользователь]@[IP адрес сервера]:/root/intercom-backend
-   ```
-3. Запустите установку:
-   ```bash
+   chmod +x deploy/install.sh
    sudo ./deploy/install.sh
    ```
 4. Backend будет установлен и запущен как systemd сервис `intercom-backend`.
@@ -93,8 +88,8 @@ TLS в `http.conf` отключен по умолчанию.
 - `REDIS_PASSWORD`
 - `TURN_USER`, `TURN_PASSWORD`
 - `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
-- `EXPO_ACCESS_TOKEN`
 - `REALPHONE` (идентификатор квартиры для MVP, например 1)
+- `EXPO_ACCESS_TOKEN` (опционально, см. [инструкцию](instructions/GET_EXPO_TOKEN.md))
 
 ## 8) Важно
 

@@ -28,5 +28,5 @@ export const env = {
     password: requireEnv("POSTGRES_PASSWORD"),
   },
   realphone: requireEnv("REALPHONE"),
-  expoAccessToken: requireEnv("EXPO_ACCESS_TOKEN"),
+  expoAccessToken: process.env.EXPO_ACCESS_TOKEN || "",
 };
