@@ -1,5 +1,4 @@
 import Fastify from "fastify";
-import dotenv from "dotenv";
 import sensible from "@fastify/sensible";
 import { env } from "./config/env";
 import { ensureSchema, ensureUser } from "./store/postgres";
@@ -16,8 +15,6 @@ import {
 } from "./store/redis";
 import { sendExpoPush } from "./push/expo";
 import crypto from "crypto";
-
-dotenv.config();
 
 const config = {
   appPort: env.appPort,

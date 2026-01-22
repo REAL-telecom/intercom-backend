@@ -1,3 +1,7 @@
+import dotenv from "dotenv";
+
+dotenv.config();
+
 const requireEnv = (key: string) => {
   const value = process.env[key];
   if (!value || value.length === 0) {
