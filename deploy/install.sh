@@ -6,7 +6,6 @@ ENV_FILE="${ROOT_DIR}/.env"
 CONFIG_DIR="${ROOT_DIR}/configs"
 LOG_DIR="/opt/intercom-backend"
 LOG_FILE="${LOG_DIR}/install.log"
-export DEBIAN_FRONTEND=noninteractive
 
 if [[ -t 1 ]]; then
   COLOR_BLUE="\033[34m"
@@ -102,13 +101,10 @@ ok "Переменные окружения найдены"
 
 section "Обновление ОС и установка системных зависимостей"
 apt-get update -y
-echo iptables-persistent iptables-persistent/autosave_v4 boolean false | debconf-set-selections
-echo iptables-persistent iptables-persistent/autosave_v6 boolean false | debconf-set-selections
 apt-get install -y \
   certbot \
   coturn \
   fail2ban \
-  iptables-persistent \
   ufw \
   wget \
   ca-certificates \
