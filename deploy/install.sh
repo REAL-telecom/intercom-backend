@@ -8,6 +8,7 @@ LOG_DIR="/opt/intercom-backend"
 LOG_FILE="${LOG_DIR}/install.log"
 
 mkdir -p "${LOG_DIR}"
+exec > >(tee -a "${LOG_FILE}") 2>&1
 
 if [[ -t 1 ]]; then
   COLOR_BLUE="\033[34m"
@@ -83,33 +84,19 @@ require_var POSTGRES_USER
 require_var POSTGRES_PASSWORD
 ok "Переменные окружения найдены"
 
-section "Обновление ОС и установка зависимостей"
+section "Обновление ОС и установка системных зависимостей"
 apt-get update -y
-apt-get install -y build-essential \
+apt-get install -y \
   certbot \
   coturn \
+  fail2ban \
   iptables-persistent \
   ufw \
-  libcurl4-openssl-dev \
-  libedit-dev \
-  libjansson-dev \
-  libldap2-dev \
-  liblzma-dev \
-  libncurses-dev \
-  libsqlite3-dev \
-  libssl-dev \
-  libsrtp2-dev \
-  libsystemd-dev \
-  libxml2-dev \
-  libxslt1-dev \
-  libpq-dev \
-  pkg-config \
-  uuid-dev \
   wget \
   ca-certificates \
   curl \
   gnupg
-ok "Зависимости установлены"
+ok "Системные зависимости установлены"
 
 section "Установка Node.js (LTS 24.x)"
 curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
@@ -151,6 +138,7 @@ cd /usr/src
 wget -q http://downloads.asterisk.org/pub/telephony/asterisk/asterisk-20-current.tar.gz
 tar xvf asterisk-20-current.tar.gz
 cd asterisk-20.*
+./contrib/scripts/install_prereq install
 ./configure --with-jansson-bundled
 make menuselect/menuselect
 make menuselect-tree
@@ -163,6 +151,8 @@ make menuselect-tree
   --enable MOH-OPSOUND-WAV
 make -j "$(nproc)" && make install
 ok "Asterisk установлен"
+rm -rf /usr/src/asterisk-20.* /usr/src/asterisk-20-current.tar.gz
+ok "Исходники Asterisk удалены"
 
 section "Создание пользователя asterisk"
 if ! id asterisk >/dev/null 2>&1; then
@@ -200,12 +190,25 @@ systemctl enable coturn
 systemctl start coturn
 ok "Coturn настроен и запущен"
 
+section "Настройка ротации логов Asterisk"
+mkdir -p /etc/logrotate.d
+cp "${CONFIG_DIR}/logrotate/asterisk" /etc/logrotate.d/asterisk
+ok "Logrotate для Asterisk настроен"
+
 section "Установка сервиса Asterisk"
 cp "${CONFIG_DIR}/asterisk/asterisk.service" /etc/systemd/system/asterisk.service
 systemctl daemon-reload
 systemctl enable asterisk
 systemctl start asterisk
 ok "Asterisk запущен"
+
+section "Настройка fail2ban"
+mkdir -p /etc/fail2ban/filter.d
+cp "${CONFIG_DIR}/fail2ban/jail.local" /etc/fail2ban/jail.local
+cp "${CONFIG_DIR}/fail2ban/filter.d/asterisk.conf" /etc/fail2ban/filter.d/asterisk.conf
+systemctl enable fail2ban
+systemctl restart fail2ban
+ok "fail2ban настроен"
 
 section "Запуск Redis и Postgres через Docker Compose"
 cd "${ROOT_DIR}"
