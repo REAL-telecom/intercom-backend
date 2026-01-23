@@ -73,8 +73,8 @@ run_with_spinner() {
   local i=0
   local out="/dev/null"
 
-  if [[ -t 1 ]]; then
-    out="/dev/tty"
+  if [[ -t 2 ]]; then
+    out="/dev/stderr"
   fi
 
   log_line "RUN: ${label}"
@@ -139,7 +139,7 @@ section "Обновление ОС и установка системных за
 run_with_spinner "apt-get update" "apt-get update -y"
 run_with_spinner "apt-get install системные пакеты" "apt-get install -y certbot coturn fail2ban ufw wget ca-certificates curl gnupg"
 policy_output="$(apt-cache policy ufw fail2ban certbot coturn)"
-echo "${policy_output}" | sed -n '1,120p'
+echo "${policy_output}" | sed -n '1,120p' >> "${LOG_FILE}" 2>&1
 if echo "${policy_output}" | awk '
   $1 ~ /:$/ { pkg=substr($1, 1, length($1)-1); installed=""; }
   $1 == "Installed:" { installed=$2; 
@@ -159,13 +159,14 @@ run_with_spinner "NodeSource setup" "curl -fsSL https://deb.nodesource.com/setup
 run_with_spinner "Установка Node.js" "apt-get install -y nodejs"
 node_version="$(node -v 2>/dev/null || true)"
 npm_version="$(npm -v 2>/dev/null || true)"
-check_output_installed "Node.js" "${node_version}"
-check_output_installed "npm" "${npm_version}"
+node_version_clean="$(echo "${node_version}" | sed 's/^v//')"
+check_output_installed "Node.js" "${node_version_clean}"
 
 section "Обновление npm"
 run_with_spinner "Обновление npm" "npm install -g npm@latest"
 npm_version="$(npm -v 2>/dev/null || true)"
-check_output_installed "npm" "${npm_version}"
+npm_version_clean="$(echo "${npm_version}" | sed 's/^v//')"
+check_output_installed "npm" "${npm_version_clean}"
 
 section "Настройка firewall (ufw)"
 ufw allow ssh
@@ -178,9 +179,9 @@ ufw allow 3478/tcp
 ufw allow 5349/udp
 ufw allow 5349/tcp
 ufw --force enable
-ufw status verbose
+ufw status verbose >> "${LOG_FILE}" 2>&1
 if ufw status verbose | grep -qi 'Status: active' \
-  && ufw status verbose | grep -qE '(^|\\s)22/tcp\\b' \
+  && (ufw status verbose | grep -qE '(^|\\s)22/tcp\\b' || ufw status verbose | grep -qE '(^|\\s)OpenSSH\\b') \
   && ufw status verbose | grep -qE '(^|\\s)80/tcp\\b' \
   && ufw status verbose | grep -qE '(^|\\s)443/tcp\\b' \
   && ufw status verbose | grep -qE '(^|\\s)8089/tcp\\b' \
@@ -203,8 +204,10 @@ run_with_spinner "apt-get update (docker)" "apt-get update -y"
 run_with_spinner "Установка Docker пакетов" "apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
 docker_version="$(docker --version 2>/dev/null || true)"
 compose_version="$(docker compose version 2>/dev/null || true)"
-check_output_installed "Docker" "${docker_version}"
-check_output_installed "Docker Compose" "${compose_version}"
+docker_version_clean="$(echo "${docker_version}" | sed 's/^Docker version //')"
+compose_version_clean="$(echo "${compose_version}" | sed 's/^Docker Compose version //; s/^v//')"
+check_output_installed "Docker" "${docker_version_clean}"
+check_output_installed "Docker Compose" "${compose_version_clean}"
 
 section "Запуск Docker"
 systemctl enable docker
@@ -213,11 +216,11 @@ check_service "docker"
 
 section "Авторизация в Docker Hub"
 login_output="$(echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USER}" --password-stdin 2>&1)"
-echo "${login_output}"
+echo "${login_output}" >> "${LOG_FILE}" 2>&1
 if echo "${login_output}" | grep -qi "Login Succeeded"; then
-  ok "Успешно"
+  ok "${login_output}"
 else
-  warn "Ошибка авторизации. Смотри лог: ${LOG_FILE}"
+  warn "${login_output}"
 fi
 
 section "Установка Asterisk"
@@ -243,8 +246,8 @@ chown -R asterisk:asterisk /var/{lib,log,run,spool,cache}/asterisk
 chown -R asterisk:asterisk /etc/asterisk
 user_info="$(id asterisk 2>/dev/null || true)"
 dirs_info="$(ls -ld /var/{lib,log,run,spool,cache}/asterisk /etc/asterisk 2>/dev/null || true)"
-echo "${user_info}"
-echo "${dirs_info}"
+echo "${user_info}" >> "${LOG_FILE}" 2>&1
+echo "${dirs_info}" >> "${LOG_FILE}" 2>&1
 if [[ -n "${user_info}" ]] && echo "${dirs_info}" | grep -q 'asterisk'; then
   ok "Пользователь создан и права настроены"
 else
@@ -263,7 +266,7 @@ sed -i "s/__ARI_PASSWORD__/${ARI_PASSWORD}/g" /etc/asterisk/ari.conf
 sed -i "s/__POSTGRES_DB__/${POSTGRES_DB}/g" /etc/asterisk/res_pgsql.conf
 sed -i "s/__POSTGRES_USER__/${POSTGRES_USER}/g" /etc/asterisk/res_pgsql.conf
 sed -i "s/__POSTGRES_PASSWORD__/${POSTGRES_PASSWORD}/g" /etc/asterisk/res_pgsql.conf
-ls -la /etc/asterisk | sed -n '1,120p'
+ls -la /etc/asterisk | sed -n '1,120p' >> "${LOG_FILE}" 2>&1
 if [[ -s /etc/asterisk/ari.conf ]] \
   && [[ -s /etc/asterisk/http.conf ]] \
   && [[ -s /etc/asterisk/pjsip.conf ]] \
@@ -288,7 +291,7 @@ sed -i "s/__TURN_PASSWORD__/${TURN_PASSWORD}/g" /etc/turnserver.conf
 
 systemctl enable coturn
 systemctl start coturn
-systemctl status coturn --no-pager | sed -n '1,20p'
+systemctl status coturn --no-pager | sed -n '1,20p' >> "${LOG_FILE}" 2>&1
 if [[ -s /etc/turnserver.conf ]] \
   && ! grep -q '__SERVER_IP__' /etc/turnserver.conf \
   && ! grep -q '__SERVER_DOMAIN__' /etc/turnserver.conf \
@@ -303,7 +306,7 @@ fi
 section "Настройка Logrotate для Asterisk"
 mkdir -p /etc/logrotate.d
 cp "${CONFIG_DIR}/logrotate/asterisk" /etc/logrotate.d/asterisk
-cat /etc/logrotate.d/asterisk
+cat /etc/logrotate.d/asterisk >> "${LOG_FILE}" 2>&1
 if [[ -s /etc/logrotate.d/asterisk ]] \
   && grep -q "daily" /etc/logrotate.d/asterisk \
   && grep -q "rotate 7" /etc/logrotate.d/asterisk \
@@ -338,12 +341,12 @@ if [[ -s /etc/fail2ban/jail.local ]] \
 else
   warn "fail2ban не настроен. Смотри лог: ${LOG_FILE}"
 fi
-fail2ban-client status || true
+fail2ban-client status >> "${LOG_FILE}" 2>&1 || true
 
 section "Запуск Redis и Postgres через Docker Compose"
 cd "${ROOT_DIR}"
 run_with_spinner "docker compose up" "docker compose up -d"
-docker compose ps
+docker compose ps >> "${LOG_FILE}" 2>&1
 if docker compose ps --services --filter status=running | grep -q '^redis$' \
   && docker compose ps --services --filter status=running | grep -q '^postgres$'; then
   ok "Redis и Postgres запущены"
