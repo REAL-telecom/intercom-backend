@@ -7,13 +7,6 @@ CONFIG_DIR="${ROOT_DIR}/configs"
 LOG_DIR="/opt/intercom-backend"
 LOG_FILE="${LOG_DIR}/install.log"
 
-mkdir -p "${LOG_DIR}"
-if [[ -t 1 ]]; then
-  exec > >(tee -a "${LOG_FILE}" /dev/tty) 2>&1
-else
-  exec > >(tee -a "${LOG_FILE}") 2>&1
-fi
-
 if [[ -t 1 ]]; then
   COLOR_BLUE="\033[34m"
   COLOR_GREEN="\033[32m"
@@ -62,6 +55,9 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   err "Файл .env не найден. Скопируйте env.example -> .env и заполните."
   exit 1
 fi
+
+mkdir -p "${LOG_DIR}"
+exec > >(tee -a "${LOG_FILE}") 2>&1
 
 set -a
 source "${ENV_FILE}"
