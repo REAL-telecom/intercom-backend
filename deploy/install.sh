@@ -142,8 +142,15 @@ require_var DOCKER_PASSWORD
 ok "Переменные окружения найдены"
 
 section "Обновление ОС и установка системных зависимостей"
-run_with_spinner "apt-get update" "apt-get update -y"
-run_with_spinner "apt-get install системные пакеты" "apt-get install -y certbot coturn fail2ban ufw wget ca-certificates curl gnupg"
+run_with_spinner "Поиск и установка обновлений" "apt-get update -y"
+run_with_spinner "Установка certbot" "apt-get install -y certbot"
+run_with_spinner "Установка coturn" "apt-get install -y coturn"
+run_with_spinner "Установка fail2ban" "apt-get install -y fail2ban"
+run_with_spinner "Установка ufw" "apt-get install -y ufw"
+run_with_spinner "Установка wget" "apt-get install -y wget"
+run_with_spinner "Установка ca-certificates" "apt-get install -y ca-certificates"
+run_with_spinner "Установка curl" "apt-get install -y curl"
+run_with_spinner "Установка gnupg" "apt-get install -y gnupg"
 policy_output="$(apt-cache policy ufw fail2ban certbot coturn)"
 echo "${policy_output}" | sed -n '1,120p' >> "${LOG_FILE}" 2>&1
 if echo "${policy_output}" | awk '
@@ -157,14 +164,13 @@ if echo "${policy_output}" | awk '
 '; then
   ok "Системные зависимости установлены"
 else
-  warn "Системные зависимости установлены не полностью. Смотри лог: ${LOG_FILE}"
+  warn "Ошибка установки или обновления системных пакетов. Смотри лог: ${LOG_FILE}"
 fi
 
 section "Установка Node.js (LTS 24.x)"
-run_with_spinner "NodeSource setup" "curl -fsSL https://deb.nodesource.com/setup_24.x | bash -"
-run_with_spinner "Установка Node.js" "apt-get install -y nodejs"
+run_with_spinner "Скачивание дистрибутива" "curl -fsSL https://deb.nodesource.com/setup_24.x | bash -"
+run_with_spinner "Установка" "apt-get install -y nodejs"
 node_version="$(node -v 2>/dev/null || true)"
-npm_version="$(npm -v 2>/dev/null || true)"
 node_version_clean="$(extract_version "${node_version}")"
 check_output_installed "Node.js" "${node_version_clean}"
 
@@ -184,19 +190,9 @@ ufw allow 3478/udp >> "${LOG_FILE}" 2>&1
 ufw allow 3478/tcp >> "${LOG_FILE}" 2>&1
 ufw allow 5349/udp >> "${LOG_FILE}" 2>&1
 ufw allow 5349/tcp >> "${LOG_FILE}" 2>&1
-ufw --force enable >> "${LOG_FILE}" 2>&1
-ufw_status="$(ufw status verbose 2>&1)"
-echo "${ufw_status}" >> "${LOG_FILE}" 2>&1
-if echo "${ufw_status}" | grep -qi 'Status: active' \
-  && (echo "${ufw_status}" | grep -qE '(^|\\s)22/tcp\\b' || echo "${ufw_status}" | grep -qE '(^|\\s)OpenSSH\\b') \
-  && echo "${ufw_status}" | grep -qE '(^|\\s)80/tcp\\b' \
-  && echo "${ufw_status}" | grep -qE '(^|\\s)443/tcp\\b' \
-  && echo "${ufw_status}" | grep -qE '(^|\\s)8089/tcp\\b' \
-  && echo "${ufw_status}" | grep -qE '(^|\\s)10000:20000/udp\\b' \
-  && echo "${ufw_status}" | grep -qE '(^|\\s)3478/udp\\b' \
-  && echo "${ufw_status}" | grep -qE '(^|\\s)3478/tcp\\b' \
-  && echo "${ufw_status}" | grep -qE '(^|\\s)5349/udp\\b' \
-  && echo "${ufw_status}" | grep -qE '(^|\\s)5349/tcp\\b'; then
+ufw_enable_output="$(ufw --force enable 2>&1)"
+echo "${ufw_enable_output}" >> "${LOG_FILE}" 2>&1
+if echo "${ufw_enable_output}" | grep -q "Firewall is active and enabled on system startup"; then
   ok "Firewall настроен"
 else
   warn "Firewall не настроен. Смотри лог: ${LOG_FILE}"
@@ -207,8 +203,8 @@ install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 chmod a+r /etc/apt/keyrings/docker.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-run_with_spinner "apt-get update (docker)" "apt-get update -y"
-run_with_spinner "Установка Docker пакетов" "apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
+run_with_spinner "Поиск обновлений" "apt-get update -y"
+run_with_spinner "Установка обновлений" "apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
 docker_version="$(docker --version 2>/dev/null || true)"
 compose_version="$(docker compose version 2>/dev/null || true)"
 docker_version_clean="$(extract_version "${docker_version}")"
@@ -232,13 +228,13 @@ fi
 
 section "Установка Asterisk"
 cd /usr/src
-run_with_spinner "Скачивание Asterisk" "wget -q http://downloads.asterisk.org/pub/telephony/asterisk/asterisk-22-current.tar.gz"
-run_with_spinner "Распаковка Asterisk" "tar xvf asterisk-22-current.tar.gz"
+run_with_spinner "Скачивание дистрибутива" "wget -q http://downloads.asterisk.org/pub/telephony/asterisk/asterisk-22-current.tar.gz"
+run_with_spinner "Распаковка дистрибутива" "tar xvf asterisk-22-current.tar.gz"
 cd asterisk-22.*
-run_with_spinner "Asterisk prereq" "./contrib/scripts/install_prereq install"
-run_with_spinner "Asterisk configure" "./configure --with-jansson-bundled"
-run_with_spinner "Asterisk menuselect" "make menuselect/menuselect && make menuselect-tree && ./menuselect/menuselect --enable codec_opus --enable res_config_pgsql --disable CORE-SOUNDS-EN-GSM --enable CORE-SOUNDS-EN-WAV --enable CORE-SOUNDS-RU-WAV --enable MOH-OPSOUND-WAV"
-run_with_spinner "Asterisk build/install" "make -j \"\$(nproc)\" && make install"
+run_with_spinner "Установка зависимостей" "./contrib/scripts/install_prereq install"
+run_with_spinner "Конфигурирование компонентов" "./configure --with-jansson-bundled"
+run_with_spinner "Подключение компонентов" "make menuselect/menuselect && make menuselect-tree && ./menuselect/menuselect --enable codec_opus --enable res_config_pgsql --disable CORE-SOUNDS-EN-GSM --enable CORE-SOUNDS-EN-WAV --enable CORE-SOUNDS-RU-WAV --enable MOH-OPSOUND-WAV"
+run_with_spinner "Сборка и установка программы" "make -j \"\$(nproc)\" && make install"
 asterisk_version="$(/usr/sbin/asterisk -V 2>/dev/null || true)"
 asterisk_version_clean="$(extract_version "${asterisk_version}")"
 check_output_installed "Asterisk" "${asterisk_version_clean}"

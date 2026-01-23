@@ -19,6 +19,15 @@
    chmod +x deploy/install.sh
    sudo ./deploy/install.sh
    ```
+   **Опционально (для продвинутых пользователей):** смотреть лог установки в реальном времени.
+   Откройте второе окно терминала и выполните:
+   ```bash
+   tail -f /opt/intercom-backend/install.log
+   ```
+   На macOS можно открыть отдельное окно автоматически:
+   ```bash
+   osascript -e 'tell application "Terminal" to do script "tail -f /opt/intercom-backend/install.log"'
+   ```
 4. Backend будет установлен и запущен как systemd сервис `intercom-backend`.
    Проверить статус:
    ```bash
