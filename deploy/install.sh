@@ -6,6 +6,7 @@ ENV_FILE="${ROOT_DIR}/.env"
 CONFIG_DIR="${ROOT_DIR}/configs"
 LOG_DIR="/opt/intercom-backend"
 LOG_FILE="${LOG_DIR}/install.log"
+export DEBIAN_FRONTEND=noninteractive
 
 if [[ -t 1 ]]; then
   COLOR_BLUE="\033[34m"
@@ -23,6 +24,26 @@ fi
 
 log_line() {
   printf "%s\n" "$1" >> "${LOG_FILE}"
+}
+
+check_cmd() {
+  local description="$1"
+  local command="$2"
+  if eval "${command}"; then
+    ok "${description}"
+  else
+    warn "${description} (проверьте вручную)"
+  fi
+}
+
+check_service() {
+  local service="$1"
+  if systemctl is-active --quiet "${service}"; then
+    ok "${service} активен"
+  else
+    warn "${service} не активен"
+    systemctl status "${service}" --no-pager || true
+  fi
 }
 
 section() {
@@ -45,11 +66,6 @@ err() {
   echo -e "${COLOR_RED}ERROR: $1${COLOR_RESET}"
   log_line "ERROR: $1"
 }
-
-if [[ $EUID -ne 0 ]]; then
-  err "Недостаточно прав. Запустите команду от имени администратора: sudo ./deploy/install.sh"
-  exit 1
-fi
 
 if [[ ! -f "${ENV_FILE}" ]]; then
   err "Файл .env не найден. Скопируйте env.example -> .env и заполните."
@@ -86,6 +102,8 @@ ok "Переменные окружения найдены"
 
 section "Обновление ОС и установка системных зависимостей"
 apt-get update -y
+echo iptables-persistent iptables-persistent/autosave_v4 boolean false | debconf-set-selections
+echo iptables-persistent iptables-persistent/autosave_v6 boolean false | debconf-set-selections
 apt-get install -y \
   certbot \
   coturn \
@@ -97,14 +115,18 @@ apt-get install -y \
   curl \
   gnupg
 ok "Системные зависимости установлены"
+apt-cache policy ufw iptables-persistent fail2ban certbot coturn | sed -n '1,120p'
 
 section "Установка Node.js (LTS 24.x)"
 curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
 apt-get install -y nodejs
 ok "Node.js установлен"
+node -v
+npm -v
 section "Обновление npm до последней версии"
 npm install -g npm@latest
 ok "npm обновлен"
+npm -v
 
 section "Настройка firewall (ufw)"
 ufw allow ssh
@@ -117,7 +139,8 @@ ufw allow 3478/tcp
 ufw allow 5349/udp
 ufw allow 5349/tcp
 ufw --force enable
-ok "Firewall настроен"
+check_cmd "Firewall активирован" "ufw status | grep -qi 'Status: active'"
+ufw status verbose
 
 section "Установка Docker"
 install -m 0755 -d /etc/apt/keyrings
@@ -126,12 +149,14 @@ chmod a+r /etc/apt/keyrings/docker.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
 apt-get update -y
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-ok "Docker установлен"
+check_cmd "Docker установлен" "docker --version >/dev/null 2>&1"
+docker --version
+docker compose version
 
 section "Запуск Docker"
 systemctl enable docker
 systemctl start docker
-ok "Docker запущен"
+check_service "docker"
 
 section "Установка Asterisk из исходников"
 cd /usr/src
@@ -151,6 +176,7 @@ make menuselect-tree
   --enable MOH-OPSOUND-WAV
 make -j "$(nproc)" && make install
 ok "Asterisk установлен"
+ldconfig -p | grep -E 'pq|srtp|ssl|jansson' | head -n 50
 rm -rf /usr/src/asterisk-20.* /usr/src/asterisk-20-current.tar.gz
 ok "Исходники Asterisk удалены"
 
@@ -164,6 +190,8 @@ mkdir -p /var/{lib,log,run,spool,cache}/asterisk
 chown -R asterisk:asterisk /var/{lib,log,run,spool,cache}/asterisk
 chown -R asterisk:asterisk /etc/asterisk
 ok "Пользователь и права настроены"
+id asterisk
+ls -ld /var/{lib,log,run,spool,cache}/asterisk /etc/asterisk
 
 section "Копирование конфигураций Asterisk"
 mkdir -p /etc/asterisk
@@ -178,6 +206,7 @@ sed -i "s/__POSTGRES_DB__/${POSTGRES_DB}/g" /etc/asterisk/res_pgsql.conf
 sed -i "s/__POSTGRES_USER__/${POSTGRES_USER}/g" /etc/asterisk/res_pgsql.conf
 sed -i "s/__POSTGRES_PASSWORD__/${POSTGRES_PASSWORD}/g" /etc/asterisk/res_pgsql.conf
 ok "Конфигурации Asterisk применены"
+ls -la /etc/asterisk | sed -n '1,120p'
 
 section "Настройка Coturn"
 cp "${CONFIG_DIR}/coturn/turnserver.conf" /etc/turnserver.conf
@@ -188,19 +217,22 @@ sed -i "s/__TURN_PASSWORD__/${TURN_PASSWORD}/g" /etc/turnserver.conf
 
 systemctl enable coturn
 systemctl start coturn
-ok "Coturn настроен и запущен"
+check_service "coturn"
+systemctl status coturn --no-pager | sed -n '1,20p'
 
 section "Настройка ротации логов Asterisk"
 mkdir -p /etc/logrotate.d
 cp "${CONFIG_DIR}/logrotate/asterisk" /etc/logrotate.d/asterisk
 ok "Logrotate для Asterisk настроен"
+cat /etc/logrotate.d/asterisk
 
 section "Установка сервиса Asterisk"
 cp "${CONFIG_DIR}/asterisk/asterisk.service" /etc/systemd/system/asterisk.service
 systemctl daemon-reload
 systemctl enable asterisk
 systemctl start asterisk
-ok "Asterisk запущен"
+check_service "asterisk"
+systemctl status asterisk --no-pager | sed -n '1,40p'
 
 section "Настройка fail2ban"
 mkdir -p /etc/fail2ban/filter.d
@@ -208,12 +240,15 @@ cp "${CONFIG_DIR}/fail2ban/jail.local" /etc/fail2ban/jail.local
 cp "${CONFIG_DIR}/fail2ban/filter.d/asterisk.conf" /etc/fail2ban/filter.d/asterisk.conf
 systemctl enable fail2ban
 systemctl restart fail2ban
-ok "fail2ban настроен"
+check_service "fail2ban"
+systemctl status fail2ban --no-pager | sed -n '1,20p'
+fail2ban-client status || true
 
 section "Запуск Redis и Postgres через Docker Compose"
 cd "${ROOT_DIR}"
 docker compose up -d
-ok "Redis и Postgres запущены"
+check_cmd "Redis и Postgres запущены" "docker compose ps --services --filter status=running | grep -q '^redis$' && docker compose ps --services --filter status=running | grep -q '^postgres$'"
+docker compose ps
 
 section "Установка и запуск backend"
 mkdir -p /opt/intercom-backend
@@ -227,13 +262,15 @@ cp /opt/intercom-backend/configs/backend/intercom-backend.service /etc/systemd/s
 systemctl daemon-reload
 systemctl enable intercom-backend
 systemctl start intercom-backend
-ok "Backend запущен"
+check_service "intercom-backend"
+systemctl status intercom-backend --no-pager | sed -n '1,40p'
 
 section "Очистка пакетов"
 apt-get -y autoremove
 apt-get -y autoclean
 apt-get -y clean
 ok "Очистка завершена"
+df -h | sed -n '1,5p'
 
 section "Готово"
 echo "Удаляем репозиторий установки..."
@@ -241,3 +278,4 @@ log_line "Удаляем репозиторий установки..."
 cd "${ROOT_DIR}/.."
 rm -rf "${ROOT_DIR}"
 ok "Репозиторий удален"
+ls -la "${ROOT_DIR}" || true

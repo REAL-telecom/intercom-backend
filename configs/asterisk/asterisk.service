@@ -4,7 +4,7 @@ After=network-online.target network.target coturn.service
 Wants=network-online.target coturn.service
 
 [Service]
-Type=notify
+Type=simple
 Environment=HOME=/var/lib/asterisk
 WorkingDirectory=/var/lib/asterisk
 User=asterisk
