@@ -34,18 +34,44 @@ const buildWsUrl = () => {
  * Connect to ARI WebSocket events stream.
  */
 export const connectAriEvents = (onEvent: AriEventHandler) => {
-  const ws = new WebSocket(buildWsUrl());
+  let attempts = 0;
+  let current: WebSocket | null = null;
 
-  ws.on("message", (data: RawData) => {
-    try {
-      const event = JSON.parse(data.toString()) as AriEvent;
-      onEvent(event);
-    } catch {
-      // ignore invalid payloads
-    }
-  });
+  const connect = () => {
+    const ws = new WebSocket(buildWsUrl());
+    current = ws;
 
-  return ws;
+    ws.on("open", () => {
+      attempts = 0;
+    });
+
+    ws.on("message", (data: RawData) => {
+      try {
+        const event = JSON.parse(data.toString()) as AriEvent;
+        onEvent(event);
+      } catch {
+        // ignore invalid payloads
+      }
+    });
+
+    ws.on("error", (error) => {
+      console.warn("ARI WebSocket error", error);
+    });
+
+    ws.on("close", (code, reason) => {
+      const reasonText = reason ? reason.toString() : "";
+      const delayMs = Math.min(30000, 1000 * 2 ** Math.min(attempts, 5));
+      attempts += 1;
+      console.warn(
+        `ARI WebSocket closed (code=${code}${reasonText ? `, reason=${reasonText}` : ""}); retry in ${delayMs}ms`
+      );
+      setTimeout(connect, delayMs);
+    });
+
+    return ws;
+  };
+
+  return connect() ?? current!;
 };
 
 /**

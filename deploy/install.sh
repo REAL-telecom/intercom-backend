@@ -21,6 +21,11 @@ else
   COLOR_RESET=""
 fi
 
+CONSOLE_OUT="/dev/stderr"
+if [[ -w /dev/tty ]]; then
+  CONSOLE_OUT="/dev/tty"
+fi
+
 log_line() {
   printf "%s\n" "$1" >> "${LOG_FILE}"
 }
@@ -36,23 +41,23 @@ check_service() {
 }
 
 section() {
-  echo ""
-  echo -e "${COLOR_BLUE}== $1 ==${COLOR_RESET}"
+  printf "\n" > "${CONSOLE_OUT}"
+  printf "%b\n" "${COLOR_BLUE}== $1 ==${COLOR_RESET}" > "${CONSOLE_OUT}"
   log_line "== $1 =="
 }
 
 ok() {
-  echo -e "${COLOR_GREEN}OK: $1${COLOR_RESET}"
+  printf "%b\n" "${COLOR_GREEN}OK: $1${COLOR_RESET}" > "${CONSOLE_OUT}"
   log_line "OK: $1"
 }
 
 warn() {
-  echo -e "${COLOR_YELLOW}WARN: $1${COLOR_RESET}"
+  printf "%b\n" "${COLOR_YELLOW}WARN: $1${COLOR_RESET}" > "${CONSOLE_OUT}"
   log_line "WARN: $1"
 }
 
 err() {
-  echo -e "${COLOR_RED}ERROR: $1${COLOR_RESET}"
+  printf "%b\n" "${COLOR_RED}ERROR: $1${COLOR_RESET}" > "${CONSOLE_OUT}"
   log_line "ERROR: $1"
 }
 
@@ -75,13 +80,7 @@ run_with_spinner() {
   local cmd="$2"
   local spinner='|/-\'
   local i=0
-  local out="/dev/null"
-
-  if [[ -w /dev/tty ]]; then
-    out="/dev/tty"
-  elif [[ -t 2 ]]; then
-    out="/dev/stderr"
-  fi
+  local out="${CONSOLE_OUT}"
 
   log_line "RUN: ${label}"
   printf "%s ... " "${label}" > "${out}"
@@ -293,7 +292,7 @@ sed -i "s/__SERVER_DOMAIN__/${SERVER_DOMAIN}/g" /etc/turnserver.conf
 sed -i "s/__TURN_USER__/${TURN_USER}/g" /etc/turnserver.conf
 sed -i "s/__TURN_PASSWORD__/${TURN_PASSWORD}/g" /etc/turnserver.conf
 
-systemctl enable coturn
+systemctl enable coturn >> "${LOG_FILE}" 2>&1
 systemctl start coturn
 systemctl status coturn --no-pager | sed -n '1,20p' >> "${LOG_FILE}" 2>&1
 if [[ -s /etc/turnserver.conf ]] \
@@ -336,7 +335,6 @@ section "Настройка fail2ban"
 mkdir -p /etc/fail2ban/filter.d
 cp "${CONFIG_DIR}/fail2ban/jail.local" /etc/fail2ban/jail.local
 cp "${CONFIG_DIR}/fail2ban/filter.d/asterisk.conf" /etc/fail2ban/filter.d/asterisk.conf
-systemctl enable fail2ban
 systemctl enable fail2ban >> "${LOG_FILE}" 2>&1
 systemctl restart fail2ban >> "${LOG_FILE}" 2>&1
 if [[ -s /etc/fail2ban/jail.local ]] \
@@ -361,11 +359,11 @@ fi
 
 section "Установка и запуск сервера"
 mkdir -p /opt/intercom-backend
-rsync -a --delete "${ROOT_DIR}/" /opt/intercom-backend/
+rsync -a --delete --exclude 'install.log' "${ROOT_DIR}/" /opt/intercom-backend/
 
 cd /opt/intercom-backend
-run_with_spinner "npm install (backend)" "npm install"
-run_with_spinner "npm run build (backend)" "npm run build"
+run_with_spinner "Скачивание и установка зависимостей" "npm install"
+run_with_spinner "Сборка" "npm run build"
 
 cp /opt/intercom-backend/configs/backend/intercom-backend.service /etc/systemd/system/intercom-backend.service
 systemctl daemon-reload
