@@ -56,11 +56,15 @@ err() {
   log_line "ERROR: $1"
 }
 
+extract_version() {
+  echo "$1" | grep -Eo '[0-9]+(\.[0-9]+)+' | head -n 1
+}
+
 check_output_installed() {
   local label="$1"
   local value="$2"
   if [[ -n "${value}" ]]; then
-    echo "OK: ${label} ${value} установлен"
+    ok "${label} версия ${value} установлен"
   else
     warn "Ошибка установки ${label}. Смотри лог: ${LOG_FILE}"
   fi
@@ -73,7 +77,9 @@ run_with_spinner() {
   local i=0
   local out="/dev/null"
 
-  if [[ -t 2 ]]; then
+  if [[ -w /dev/tty ]]; then
+    out="/dev/tty"
+  elif [[ -t 2 ]]; then
     out="/dev/stderr"
   fi
 
@@ -159,37 +165,38 @@ run_with_spinner "NodeSource setup" "curl -fsSL https://deb.nodesource.com/setup
 run_with_spinner "Установка Node.js" "apt-get install -y nodejs"
 node_version="$(node -v 2>/dev/null || true)"
 npm_version="$(npm -v 2>/dev/null || true)"
-node_version_clean="$(echo "${node_version}" | sed 's/^v//')"
+node_version_clean="$(extract_version "${node_version}")"
 check_output_installed "Node.js" "${node_version_clean}"
 
 section "Обновление npm"
 run_with_spinner "Обновление npm" "npm install -g npm@latest"
 npm_version="$(npm -v 2>/dev/null || true)"
-npm_version_clean="$(echo "${npm_version}" | sed 's/^v//')"
+npm_version_clean="$(extract_version "${npm_version}")"
 check_output_installed "npm" "${npm_version_clean}"
 
 section "Настройка firewall (ufw)"
-ufw allow ssh
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw allow 8089/tcp
-ufw allow 10000:20000/udp
-ufw allow 3478/udp
-ufw allow 3478/tcp
-ufw allow 5349/udp
-ufw allow 5349/tcp
-ufw --force enable
-ufw status verbose >> "${LOG_FILE}" 2>&1
-if ufw status verbose | grep -qi 'Status: active' \
-  && (ufw status verbose | grep -qE '(^|\\s)22/tcp\\b' || ufw status verbose | grep -qE '(^|\\s)OpenSSH\\b') \
-  && ufw status verbose | grep -qE '(^|\\s)80/tcp\\b' \
-  && ufw status verbose | grep -qE '(^|\\s)443/tcp\\b' \
-  && ufw status verbose | grep -qE '(^|\\s)8089/tcp\\b' \
-  && ufw status verbose | grep -qE '(^|\\s)10000:20000/udp\\b' \
-  && ufw status verbose | grep -qE '(^|\\s)3478/udp\\b' \
-  && ufw status verbose | grep -qE '(^|\\s)3478/tcp\\b' \
-  && ufw status verbose | grep -qE '(^|\\s)5349/udp\\b' \
-  && ufw status verbose | grep -qE '(^|\\s)5349/tcp\\b'; then
+ufw allow ssh >> "${LOG_FILE}" 2>&1
+ufw allow 80/tcp >> "${LOG_FILE}" 2>&1
+ufw allow 443/tcp >> "${LOG_FILE}" 2>&1
+ufw allow 8089/tcp >> "${LOG_FILE}" 2>&1
+ufw allow 10000:20000/udp >> "${LOG_FILE}" 2>&1
+ufw allow 3478/udp >> "${LOG_FILE}" 2>&1
+ufw allow 3478/tcp >> "${LOG_FILE}" 2>&1
+ufw allow 5349/udp >> "${LOG_FILE}" 2>&1
+ufw allow 5349/tcp >> "${LOG_FILE}" 2>&1
+ufw --force enable >> "${LOG_FILE}" 2>&1
+ufw_status="$(ufw status verbose 2>&1)"
+echo "${ufw_status}" >> "${LOG_FILE}" 2>&1
+if echo "${ufw_status}" | grep -qi 'Status: active' \
+  && (echo "${ufw_status}" | grep -qE '(^|\\s)22/tcp\\b' || echo "${ufw_status}" | grep -qE '(^|\\s)OpenSSH\\b') \
+  && echo "${ufw_status}" | grep -qE '(^|\\s)80/tcp\\b' \
+  && echo "${ufw_status}" | grep -qE '(^|\\s)443/tcp\\b' \
+  && echo "${ufw_status}" | grep -qE '(^|\\s)8089/tcp\\b' \
+  && echo "${ufw_status}" | grep -qE '(^|\\s)10000:20000/udp\\b' \
+  && echo "${ufw_status}" | grep -qE '(^|\\s)3478/udp\\b' \
+  && echo "${ufw_status}" | grep -qE '(^|\\s)3478/tcp\\b' \
+  && echo "${ufw_status}" | grep -qE '(^|\\s)5349/udp\\b' \
+  && echo "${ufw_status}" | grep -qE '(^|\\s)5349/tcp\\b'; then
   ok "Firewall настроен"
 else
   warn "Firewall не настроен. Смотри лог: ${LOG_FILE}"
@@ -204,23 +211,23 @@ run_with_spinner "apt-get update (docker)" "apt-get update -y"
 run_with_spinner "Установка Docker пакетов" "apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
 docker_version="$(docker --version 2>/dev/null || true)"
 compose_version="$(docker compose version 2>/dev/null || true)"
-docker_version_clean="$(echo "${docker_version}" | sed 's/^Docker version //')"
-compose_version_clean="$(echo "${compose_version}" | sed 's/^Docker Compose version //; s/^v//')"
+docker_version_clean="$(extract_version "${docker_version}")"
+compose_version_clean="$(extract_version "${compose_version}")"
 check_output_installed "Docker" "${docker_version_clean}"
 check_output_installed "Docker Compose" "${compose_version_clean}"
 
 section "Запуск Docker"
-systemctl enable docker
-systemctl start docker
+systemctl enable docker >> "${LOG_FILE}" 2>&1
+systemctl start docker >> "${LOG_FILE}" 2>&1
 check_service "docker"
 
 section "Авторизация в Docker Hub"
 login_output="$(echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USER}" --password-stdin 2>&1)"
 echo "${login_output}" >> "${LOG_FILE}" 2>&1
 if echo "${login_output}" | grep -qi "Login Succeeded"; then
-  ok "${login_output}"
+  ok "Login Succeeded"
 else
-  warn "${login_output}"
+  err "${login_output}"
 fi
 
 section "Установка Asterisk"
@@ -233,7 +240,8 @@ run_with_spinner "Asterisk configure" "./configure --with-jansson-bundled"
 run_with_spinner "Asterisk menuselect" "make menuselect/menuselect && make menuselect-tree && ./menuselect/menuselect --enable codec_opus --enable res_config_pgsql --disable CORE-SOUNDS-EN-GSM --enable CORE-SOUNDS-EN-WAV --enable CORE-SOUNDS-RU-WAV --enable MOH-OPSOUND-WAV"
 run_with_spinner "Asterisk build/install" "make -j \"\$(nproc)\" && make install"
 asterisk_version="$(/usr/sbin/asterisk -V 2>/dev/null || true)"
-check_output_installed "Asterisk" "${asterisk_version}"
+asterisk_version_clean="$(extract_version "${asterisk_version}")"
+check_output_installed "Asterisk" "${asterisk_version_clean}"
 
 section "Создание пользователя asterisk"
 if ! id asterisk >/dev/null 2>&1; then
@@ -319,8 +327,8 @@ fi
 section "Установка сервиса Asterisk"
 cp "${CONFIG_DIR}/asterisk/asterisk.service" /etc/systemd/system/asterisk.service
 systemctl daemon-reload
-systemctl enable asterisk
-systemctl start asterisk
+systemctl enable asterisk >> "${LOG_FILE}" 2>&1
+systemctl start asterisk >> "${LOG_FILE}" 2>&1
 if [[ -s /etc/systemd/system/asterisk.service ]] \
   && systemctl is-active --quiet asterisk; then
   ok "Asterisk запущен"
@@ -333,7 +341,8 @@ mkdir -p /etc/fail2ban/filter.d
 cp "${CONFIG_DIR}/fail2ban/jail.local" /etc/fail2ban/jail.local
 cp "${CONFIG_DIR}/fail2ban/filter.d/asterisk.conf" /etc/fail2ban/filter.d/asterisk.conf
 systemctl enable fail2ban
-systemctl restart fail2ban
+systemctl enable fail2ban >> "${LOG_FILE}" 2>&1
+systemctl restart fail2ban >> "${LOG_FILE}" 2>&1
 if [[ -s /etc/fail2ban/jail.local ]] \
   && [[ -s /etc/fail2ban/filter.d/asterisk.conf ]] \
   && systemctl is-active --quiet fail2ban; then
@@ -364,8 +373,8 @@ run_with_spinner "npm run build (backend)" "npm run build"
 
 cp /opt/intercom-backend/configs/backend/intercom-backend.service /etc/systemd/system/intercom-backend.service
 systemctl daemon-reload
-systemctl enable intercom-backend
-systemctl start intercom-backend
+systemctl enable intercom-backend >> "${LOG_FILE}" 2>&1
+systemctl start intercom-backend >> "${LOG_FILE}" 2>&1
 if systemctl is-active --quiet intercom-backend; then
   ok "Сервис запущен"
 else
@@ -382,16 +391,17 @@ fi
 
 section "Завершение установки"
 echo "Удаление неиспользуемых зависимостей и следов установок ..."
-apt-get -y autoremove
-apt-get -y autoclean
-apt-get -y clean
+apt-get -y autoremove >> "${LOG_FILE}" 2>&1
+apt-get -y autoclean >> "${LOG_FILE}" 2>&1
+apt-get -y clean >> "${LOG_FILE}" 2>&1
+cleanup_ok=1
 
 echo "Удаление исходников Asterisk..."
 rm -rf /usr/src/asterisk-22.* /usr/src/asterisk-22-current.tar.gz
 if ls /usr/src/asterisk-22.* >/dev/null 2>&1 || ls /usr/src/asterisk-22-current.tar.gz >/dev/null 2>&1; then
-  warn "Исходники Asterisk не удалены. Смотри лог: ${LOG_FILE}"
+  src_ok=0
 else
-  ok "Исходники Asterisk удалены"
+  src_ok=1
 fi
 
 echo "Удаление репозитория установки..."
@@ -399,8 +409,12 @@ log_line "Удаление репозитория установки..."
 cd "${ROOT_DIR}/.."
 rm -rf "${ROOT_DIR}"
 if [[ -d "${ROOT_DIR}" ]]; then
-  warn "Репозиторий не удален. Смотри лог: ${LOG_FILE}"
+  repo_ok=0
 else
-  ok "Репозиторий удален"
+  repo_ok=1
 fi
-ok "Установка завершена"
+if [[ ${cleanup_ok} -eq 1 && ${src_ok} -eq 1 && ${repo_ok} -eq 1 ]]; then
+  ok "Установка завершена"
+else
+  warn "Установка завершена с предупреждениями. Смотри лог: ${LOG_FILE}"
+fi
