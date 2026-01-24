@@ -232,7 +232,14 @@ run_with_spinner "Распаковка дистрибутива" "tar xvf asteri
 cd asterisk-22.*
 run_with_spinner "Установка зависимостей" "./contrib/scripts/install_prereq install"
 run_with_spinner "Конфигурирование компонентов" "./configure --with-jansson-bundled"
-run_with_spinner "Подключение компонентов" "make menuselect/menuselect && make menuselect-tree && ./menuselect/menuselect --enable codec_opus --enable res_config_pgsql --disable CORE-SOUNDS-EN-GSM --enable CORE-SOUNDS-EN-WAV --enable CORE-SOUNDS-RU-WAV --enable MOH-OPSOUND-WAV"
+run_with_spinner "Подключение компонентов" "make menuselect/menuselect && make menuselect-tree"
+if ./menuselect/menuselect --list-options | grep -q '^res_pjsip_endpoint_identifier_ip$'; then
+  MENUSELECT_BASE="--enable codec_opus --enable res_config_pgsql --enable res_pjsip_endpoint_identifier_ip --disable CORE-SOUNDS-EN-GSM --enable CORE-SOUNDS-EN-WAV --enable CORE-SOUNDS-RU-WAV --enable MOH-OPSOUND-WAV"
+  run_with_spinner "Подключение компонентов" "./menuselect/menuselect ${MENUSELECT_BASE}"
+else
+  err "res_pjsip_endpoint_identifier_ip недоступен в этой версии Asterisk. Установка остановлена."
+  exit 1
+fi
 run_with_spinner "Сборка и установка программы" "make -j \"\$(nproc)\" && make install"
 asterisk_version="$(/usr/sbin/asterisk -V 2>/dev/null || true)"
 asterisk_version_clean="$(extract_version "${asterisk_version}")"

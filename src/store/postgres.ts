@@ -40,7 +40,8 @@ export const ensureSchema = async () => {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS ps_aors (
       id TEXT PRIMARY KEY,
-      max_contacts INTEGER
+      max_contacts INTEGER,
+      contact TEXT
     );
   `);
   await pool.query(`
@@ -60,10 +61,33 @@ export const ensureSchema = async () => {
       context TEXT,
       disallow TEXT,
       allow TEXT,
+      mailboxes TEXT,
+      templates TEXT,
       direct_media TEXT,
       force_rport TEXT,
       rewrite_contact TEXT,
       rtp_symmetric TEXT
+    );
+  `);
+  await pool.query(`
+    ALTER TABLE ps_endpoints
+    ADD COLUMN IF NOT EXISTS mailboxes TEXT;
+  `);
+  await pool.query(`
+    ALTER TABLE ps_endpoints
+    ADD COLUMN IF NOT EXISTS templates TEXT;
+  `);
+  await pool.query(`
+    ALTER TABLE ps_aors
+    ADD COLUMN IF NOT EXISTS contact TEXT;
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ps_endpoint_id_ips (
+      id TEXT PRIMARY KEY,
+      endpoint TEXT NOT NULL,
+      match TEXT NOT NULL,
+      srv_lookups TEXT,
+      match_header TEXT
     );
   `);
   await pool.query(`
@@ -139,8 +163,9 @@ export const createTempSipEndpoint = async (params: {
   username: string;
   password: string;
   context: string;
+  templateId?: string;
 }) => {
-  const { id, username, password, context } = params;
+  const { id, username, password, context, templateId = "tpl_client" } = params;
   await pool.query(
     `
     INSERT INTO ps_aors (id, max_contacts)
@@ -160,15 +185,15 @@ export const createTempSipEndpoint = async (params: {
   await pool.query(
     `
     INSERT INTO ps_endpoints (
-      id, transport, aors, auth, context, disallow, allow,
+      id, transport, aors, auth, context, templates, disallow, allow,
       direct_media, force_rport, rewrite_contact, rtp_symmetric
     ) VALUES (
-      $1, 'transport-udp', $1, $1, $2, 'all', 'ulaw,alaw',
+      $1, 'transport-udp', $1, $1, $2, $3, 'all', NULL,
       'no', 'yes', 'yes', 'yes'
     )
-    ON CONFLICT (id) DO UPDATE SET context = EXCLUDED.context;
+    ON CONFLICT (id) DO UPDATE SET context = EXCLUDED.context, templates = EXCLUDED.templates;
     `,
-    [id, context]
+    [id, context, templateId]
   );
 };
 
@@ -189,6 +214,32 @@ export const listTempSipEndpoints = async () => {
     `SELECT id FROM ps_endpoints WHERE id LIKE 'tmp_%' OR id LIKE 'out_%'`
   );
   return result.rows.map((row: { id: string }) => row.id);
+};
+
+/**
+ * Ensure default PJSIP endpoint templates exist.
+ */
+export const ensurePjsipTemplates = async () => {
+  await pool.query(
+    `
+    INSERT INTO ps_endpoints (
+      id, transport, disallow, allow, direct_media, force_rport, rewrite_contact, rtp_symmetric
+    ) VALUES (
+      'tpl_domophone', 'transport-udp', 'all', 'ulaw,alaw,h264', 'no', 'yes', 'yes', 'yes'
+    )
+    ON CONFLICT (id) DO UPDATE SET allow = EXCLUDED.allow;
+    `
+  );
+  await pool.query(
+    `
+    INSERT INTO ps_endpoints (
+      id, transport, disallow, allow, direct_media, force_rport, rewrite_contact, rtp_symmetric
+    ) VALUES (
+      'tpl_client', 'transport-udp', 'all', 'opus,ulaw,alaw,vp8,vp9,h264', 'no', 'yes', 'yes', 'yes'
+    )
+    ON CONFLICT (id) DO UPDATE SET allow = EXCLUDED.allow;
+    `
+  );
 };
 
 export const db = pool;

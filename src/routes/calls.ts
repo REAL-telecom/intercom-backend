@@ -76,6 +76,7 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
       username: sipUsername,
       password: sipPassword,
       context: "intercom",
+      templateId: "tpl_client",
     });
 
     const payload: OutgoingPayload = {

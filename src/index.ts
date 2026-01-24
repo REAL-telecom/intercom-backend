@@ -1,7 +1,7 @@
 import Fastify from "fastify";
 import sensible from "@fastify/sensible";
 import { env } from "./config/env";
-import { ensureSchema, ensureUser } from "./store/postgres";
+import { ensureSchema, ensureUser, ensurePjsipTemplates } from "./store/postgres";
 import { registerPushRoutes } from "./routes/push";
 import { registerCallRoutes } from "./routes/calls";
 import { connectAriEvents, holdChannel, addChannelToBridge } from "./ari/client";
@@ -35,6 +35,7 @@ const app = Fastify({ logger: true });
 app.register(sensible);
 
 ensureSchema()
+  .then(() => ensurePjsipTemplates())
   .then(() => ensureUser(env.realphone))
   .catch((error) => {
     app.log.error({ error }, "Failed to ensure database schema");
@@ -74,6 +75,7 @@ connectAriEvents(async (event) => {
         username: sipUsername,
         password: sipPassword,
         context: "intercom",
+        templateId: "tpl_client",
       });
 
       await setCallToken(
