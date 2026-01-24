@@ -226,20 +226,15 @@ else
 fi
 
 section "Установка Asterisk"
+ASTERISK_MAJOR="22"
+ASTERISK_TARBALL="asterisk-${ASTERISK_MAJOR}-current.tar.gz"
 cd /usr/src
-run_with_spinner "Скачивание дистрибутива" "wget -q http://downloads.asterisk.org/pub/telephony/asterisk/asterisk-22-current.tar.gz"
-run_with_spinner "Распаковка дистрибутива" "tar xvf asterisk-22-current.tar.gz"
-cd asterisk-22.*
+run_with_spinner "Скачивание дистрибутива" "wget -q http://downloads.asterisk.org/pub/telephony/asterisk/${ASTERISK_TARBALL}"
+run_with_spinner "Распаковка дистрибутива" "tar xvf ${ASTERISK_TARBALL}"
+cd asterisk-${ASTERISK_MAJOR}.*
 run_with_spinner "Установка зависимостей" "./contrib/scripts/install_prereq install"
 run_with_spinner "Конфигурирование компонентов" "./configure --with-jansson-bundled"
-run_with_spinner "Подключение компонентов" "make menuselect/menuselect && make menuselect-tree"
-if ./menuselect/menuselect --list-options | grep -q '^res_pjsip_endpoint_identifier_ip$'; then
-  MENUSELECT_BASE="--enable codec_opus --enable res_config_pgsql --enable res_pjsip_endpoint_identifier_ip --disable CORE-SOUNDS-EN-GSM --enable CORE-SOUNDS-EN-WAV --enable CORE-SOUNDS-RU-WAV --enable MOH-OPSOUND-WAV"
-  run_with_spinner "Подключение компонентов" "./menuselect/menuselect ${MENUSELECT_BASE}"
-else
-  err "res_pjsip_endpoint_identifier_ip недоступен в этой версии Asterisk. Установка остановлена."
-  exit 1
-fi
+run_with_spinner "Подключение компонентов" "make menuselect/menuselect && make menuselect-tree && ./menuselect/menuselect --enable codec_opus --enable res_config_pgsql --enable res_pjsip_endpoint_identifier_ip --disable CORE-SOUNDS-EN-GSM --enable CORE-SOUNDS-EN-WAV --enable CORE-SOUNDS-RU-WAV --enable MOH-OPSOUND-WAV"
 run_with_spinner "Сборка и установка программы" "make -j \"\$(nproc)\" && make install"
 asterisk_version="$(/usr/sbin/asterisk -V 2>/dev/null || true)"
 asterisk_version_clean="$(extract_version "${asterisk_version}")"
@@ -405,8 +400,8 @@ apt-get -y clean >> "${LOG_FILE}" 2>&1
 cleanup_ok=1
 
 echo "Удаление исходников Asterisk..."
-rm -rf /usr/src/asterisk-22.* /usr/src/asterisk-22-current.tar.gz
-if ls /usr/src/asterisk-22.* >/dev/null 2>&1 || ls /usr/src/asterisk-22-current.tar.gz >/dev/null 2>&1; then
+rm -rf "/usr/src/asterisk-${ASTERISK_MAJOR}.*" "/usr/src/${ASTERISK_TARBALL}"
+if ls "/usr/src/asterisk-${ASTERISK_MAJOR}.*" >/dev/null 2>&1 || ls "/usr/src/${ASTERISK_TARBALL}" >/dev/null 2>&1; then
   src_ok=0
 else
   src_ok=1
