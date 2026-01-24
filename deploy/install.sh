@@ -202,8 +202,8 @@ install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 chmod a+r /etc/apt/keyrings/docker.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-run_with_spinner "Поиск обновлений" "apt-get update -y"
-run_with_spinner "Установка обновлений" "apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
+run_with_spinner "Скачивание дистрибутива" "apt-get update -y"
+run_with_spinner "Установка" "apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
 docker_version="$(docker --version 2>/dev/null || true)"
 compose_version="$(docker compose version 2>/dev/null || true)"
 docker_version_clean="$(extract_version "${docker_version}")"
@@ -376,7 +376,15 @@ else
 fi
 
 echo "Проверка доступности сервера"
-health_output="$(curl -fsS "http://127.0.0.1:${APP_PORT:-3000}/health" 2>/dev/null || true)"
+sleep 2
+health_output=""
+for _ in {1..10}; do
+  health_output="$(curl -fsS "http://127.0.0.1:${APP_PORT:-3000}/health" 2>/dev/null || true)"
+  if [[ -n "${health_output}" ]]; then
+    break
+  fi
+  sleep 1
+done
 if [[ -n "${health_output}" ]]; then
   ok "Сервер доступен"
 else
@@ -386,7 +394,6 @@ fi
 section "Завершение установки"
 echo "Удаление неиспользуемых зависимостей и следов установок ..."
 apt-get -y autoremove >> "${LOG_FILE}" 2>&1
-apt-get -y autoclean >> "${LOG_FILE}" 2>&1
 apt-get -y clean >> "${LOG_FILE}" 2>&1
 cleanup_ok=1
 

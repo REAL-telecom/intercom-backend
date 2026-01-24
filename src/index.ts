@@ -5,13 +5,23 @@ import { ensureSchema, ensureUser } from "./store/postgres";
 import { registerPushRoutes } from "./routes/push";
 import { registerCallRoutes } from "./routes/calls";
 import { connectAriEvents, holdChannel, addChannelToBridge } from "./ari/client";
-import { listPushTokens, createTempSipEndpoint, deleteTempSipEndpoint } from "./store/postgres";
+import {
+  listPushTokens,
+  createTempSipEndpoint,
+  deleteTempSipEndpoint,
+  listTempSipEndpoints,
+} from "./store/postgres";
 import {
   setCallToken,
   setChannelSession,
   deleteCallToken,
   getChannelSession,
   deleteChannelSession,
+  setEndpointSession,
+  getEndpointSession,
+  deleteEndpointSession,
+  getCallToken,
+  getOutgoingToken,
 } from "./store/redis";
 import { sendExpoPush } from "./push/expo";
 import crypto from "crypto";
@@ -82,6 +92,7 @@ connectAriEvents(async (event) => {
         },
         env.callTokenTtlSec
       );
+      await setEndpointSession(endpointId, { type: "call", token: callToken }, env.callTokenTtlSec);
 
       await setChannelSession(
         channel.id,
@@ -121,6 +132,7 @@ connectAriEvents(async (event) => {
         await deleteTempSipEndpoint(session.endpointId);
         await deleteCallToken(session.callToken);
         await deleteChannelSession(channel.id);
+        await deleteEndpointSession(session.endpointId);
       }
     } catch (error) {
       app.log.warn({ error }, "Failed to cleanup after StasisEnd");
@@ -131,6 +143,42 @@ connectAriEvents(async (event) => {
 app.get("/health", async () => {
   return { ok: true, service: "intercom-backend", config: { baseUrl: config.baseUrl } };
 });
+
+/**
+ * Cleanup temporary endpoints without active tokens.
+ */
+const cleanupStaleEndpoints = async () => {
+  try {
+    const endpointIds = await listTempSipEndpoints();
+    for (const endpointId of endpointIds) {
+      const session = await getEndpointSession<{ type: "call" | "outgoing"; token: string }>(
+        endpointId
+      );
+      if (!session) {
+        await deleteTempSipEndpoint(endpointId);
+        continue;
+      }
+
+      if (session.type === "call") {
+        const token = await getCallToken(session.token);
+        if (!token) {
+          await deleteTempSipEndpoint(endpointId);
+          await deleteEndpointSession(endpointId);
+        }
+      } else {
+        const token = await getOutgoingToken(session.token);
+        if (!token) {
+          await deleteTempSipEndpoint(endpointId);
+          await deleteEndpointSession(endpointId);
+        }
+      }
+    }
+  } catch (error) {
+    app.log.warn({ error }, "Failed to cleanup stale endpoints");
+  }
+};
+
+setInterval(cleanupStaleEndpoints, 60000);
 
 app.listen({ port: config.appPort, host: "0.0.0.0" }).catch((err) => {
   app.log.error(err);

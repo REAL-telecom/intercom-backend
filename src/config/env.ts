@@ -19,7 +19,7 @@ export const env = {
   ariUser: requireEnv("ARI_USER"),
   ariPassword: requireEnv("ARI_PASSWORD"),
   ariAppName: "intercom",
-  callTokenTtlSec: 15,
+  callTokenTtlSec: 300,
   ringTimeoutSec: 15,
   redisHost: "127.0.0.1",
   redisPort: 6379,

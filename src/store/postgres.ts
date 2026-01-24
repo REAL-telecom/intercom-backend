@@ -181,4 +181,14 @@ export const deleteTempSipEndpoint = async (id: string) => {
   await pool.query(`DELETE FROM ps_aors WHERE id = $1`, [id]);
 };
 
+/**
+ * List temporary SIP endpoints by prefix.
+ */
+export const listTempSipEndpoints = async () => {
+  const result = await pool.query(
+    `SELECT id FROM ps_endpoints WHERE id LIKE 'tmp_%' OR id LIKE 'out_%'`
+  );
+  return result.rows.map((row: { id: string }) => row.id);
+};
+
 export const db = pool;
