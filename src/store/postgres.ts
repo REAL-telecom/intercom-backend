@@ -82,15 +82,6 @@ export const ensureSchema = async () => {
     ADD COLUMN IF NOT EXISTS contact TEXT;
   `);
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS ps_endpoint_id_ips (
-      id TEXT PRIMARY KEY,
-      endpoint TEXT NOT NULL,
-      match TEXT NOT NULL,
-      srv_lookups TEXT,
-      match_header TEXT
-    );
-  `);
-  await pool.query(`
     CREATE TABLE IF NOT EXISTS push_tokens (
       id SERIAL PRIMARY KEY,
       user_id TEXT REFERENCES users(id),
@@ -235,7 +226,7 @@ export const ensurePjsipTemplates = async () => {
     INSERT INTO ps_endpoints (
       id, transport, disallow, allow, direct_media, force_rport, rewrite_contact, rtp_symmetric
     ) VALUES (
-      'tpl_client', 'transport-udp', 'all', 'opus,ulaw,alaw,vp8,vp9,h264', 'no', 'yes', 'yes', 'yes'
+      'tpl_client', 'transport-udp', 'all', 'ulaw,alaw,h264', 'no', 'yes', 'yes', 'yes'
     )
     ON CONFLICT (id) DO UPDATE SET allow = EXCLUDED.allow;
     `

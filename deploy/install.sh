@@ -234,7 +234,7 @@ run_with_spinner "Распаковка дистрибутива" "tar xvf ${ASTE
 cd asterisk-${ASTERISK_MAJOR}.*
 run_with_spinner "Установка зависимостей" "./contrib/scripts/install_prereq install"
 run_with_spinner "Конфигурирование компонентов" "./configure --with-jansson-bundled"
-run_with_spinner "Подключение компонентов" "make menuselect/menuselect && make menuselect-tree && ./menuselect/menuselect --enable codec_opus --enable res_config_pgsql --enable res_pjsip_endpoint_identifier_ip --disable CORE-SOUNDS-EN-GSM --enable CORE-SOUNDS-EN-WAV --enable CORE-SOUNDS-RU-WAV --enable MOH-OPSOUND-WAV"
+run_with_spinner "Подключение компонентов" "make menuselect/menuselect && make menuselect-tree && ./menuselect/menuselect --enable codec_opus --enable res_config_pgsql --disable CORE-SOUNDS-EN-GSM --enable CORE-SOUNDS-EN-WAV --enable CORE-SOUNDS-RU-WAV --enable MOH-OPSOUND-WAV"
 run_with_spinner "Сборка и установка программы" "make -j \"\$(nproc)\" && make install"
 asterisk_version="$(/usr/sbin/asterisk -V 2>/dev/null || true)"
 asterisk_version_clean="$(extract_version "${asterisk_version}")"
