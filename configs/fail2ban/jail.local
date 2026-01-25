@@ -8,4 +8,8 @@ enabled = true
 filter = asterisk
 logpath = /var/log/asterisk/messages
 backend = auto
+ignoreip = 127.0.0.1/8 ::1
+# Добавьте сюда IP домофона(ов), чтобы их не банило во время Digest-challenge/отладки.
+# Пример:
+# ignoreip = 127.0.0.1/8 ::1 176.100.64.203
 action = iptables-allports[name=ASTERISK, protocol=all]

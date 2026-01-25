@@ -166,19 +166,6 @@ else
   warn "Ошибка установки или обновления системных пакетов. Смотри лог: ${LOG_FILE}"
 fi
 
-section "Установка Node.js (LTS 24.x)"
-run_with_spinner "Скачивание дистрибутива" "curl -fsSL https://deb.nodesource.com/setup_24.x | bash -"
-run_with_spinner "Установка" "apt-get install -y nodejs"
-node_version="$(node -v 2>/dev/null || true)"
-node_version_clean="$(extract_version "${node_version}")"
-check_output_installed "Node.js" "${node_version_clean}"
-
-section "Обновление npm"
-run_with_spinner "Обновление npm" "npm install -g npm@latest"
-npm_version="$(npm -v 2>/dev/null || true)"
-npm_version_clean="$(extract_version "${npm_version}")"
-check_output_installed "npm" "${npm_version_clean}"
-
 section "Настройка firewall (ufw)"
 ufw allow ssh >> "${LOG_FILE}" 2>&1
 ufw allow 80/tcp >> "${LOG_FILE}" 2>&1
@@ -186,44 +173,19 @@ ufw allow 443/tcp >> "${LOG_FILE}" 2>&1
 ufw allow 5060/udp >> "${LOG_FILE}" 2>&1
 ufw allow 8089/tcp >> "${LOG_FILE}" 2>&1
 ufw allow 10000:20000/udp >> "${LOG_FILE}" 2>&1
+ufw allow 3000/udp >> "${LOG_FILE}" 2>&1
+ufw allow 3000/tcp >> "${LOG_FILE}" 2>&1
 ufw allow 3478/udp >> "${LOG_FILE}" 2>&1
 ufw allow 3478/tcp >> "${LOG_FILE}" 2>&1
 ufw allow 5349/udp >> "${LOG_FILE}" 2>&1
 ufw allow 5349/tcp >> "${LOG_FILE}" 2>&1
 ufw_enable_output="$(ufw --force enable 2>&1)"
+ufw status verbose >> "${LOG_FILE}" 2>&1
 echo "${ufw_enable_output}" >> "${LOG_FILE}" 2>&1
 if echo "${ufw_enable_output}" | grep -q "Firewall is active and enabled on system startup"; then
   ok "Firewall настроен"
 else
   warn "Firewall не настроен. Смотри лог: ${LOG_FILE}"
-fi
-
-section "Установка Docker"
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-chmod a+r /etc/apt/keyrings/docker.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-run_with_spinner "Скачивание дистрибутива" "apt-get update -y"
-run_with_spinner "Установка" "apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
-docker_version="$(docker --version 2>/dev/null || true)"
-compose_version="$(docker compose version 2>/dev/null || true)"
-docker_version_clean="$(extract_version "${docker_version}")"
-compose_version_clean="$(extract_version "${compose_version}")"
-check_output_installed "Docker" "${docker_version_clean}"
-check_output_installed "Docker Compose" "${compose_version_clean}"
-
-section "Запуск Docker"
-systemctl enable docker >> "${LOG_FILE}" 2>&1
-systemctl start docker >> "${LOG_FILE}" 2>&1
-check_service "docker"
-
-section "Авторизация в Docker Hub"
-login_output="$(echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USER}" --password-stdin 2>&1)"
-echo "${login_output}" >> "${LOG_FILE}" 2>&1
-if echo "${login_output}" | grep -qi "Login Succeeded"; then
-  ok "Login Succeeded"
-else
-  err "${login_output}"
 fi
 
 section "Установка Asterisk"
@@ -299,6 +261,19 @@ else
   warn "Утилиты логов не найдены в репозитории (configs/tools). Смотри лог: ${LOG_FILE}"
 fi
 
+section "Настройка Logrotate для Asterisk"
+mkdir -p /etc/logrotate.d
+cp "${CONFIG_DIR}/logrotate/asterisk" /etc/logrotate.d/asterisk
+cat /etc/logrotate.d/asterisk >> "${LOG_FILE}" 2>&1
+if [[ -s /etc/logrotate.d/asterisk ]] \
+  && grep -q "daily" /etc/logrotate.d/asterisk \
+  && grep -q "rotate 7" /etc/logrotate.d/asterisk \
+  && grep -q "/var/log/asterisk/messages" /etc/logrotate.d/asterisk; then
+  ok "Logrotate для Asterisk настроен"
+else
+  warn "Ошибка настройки Logrotate для Asterisk. Смотри лог: ${LOG_FILE}"
+fi
+
 section "Настройка Coturn"
 cp "${CONFIG_DIR}/coturn/turnserver.conf" /etc/turnserver.conf
 sed -i "s/__SERVER_IP__/${SERVER_IP}/g" /etc/turnserver.conf
@@ -320,17 +295,43 @@ else
   warn "Coturn не настроен. Смотри лог: ${LOG_FILE}"
 fi
 
-section "Настройка Logrotate для Asterisk"
-mkdir -p /etc/logrotate.d
-cp "${CONFIG_DIR}/logrotate/asterisk" /etc/logrotate.d/asterisk
-cat /etc/logrotate.d/asterisk >> "${LOG_FILE}" 2>&1
-if [[ -s /etc/logrotate.d/asterisk ]] \
-  && grep -q "daily" /etc/logrotate.d/asterisk \
-  && grep -q "rotate 7" /etc/logrotate.d/asterisk \
-  && grep -q "/var/log/asterisk/messages" /etc/logrotate.d/asterisk; then
-  ok "Logrotate для Asterisk настроен"
+section "Установка Docker"
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+chmod a+r /etc/apt/keyrings/docker.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+run_with_spinner "Скачивание дистрибутива" "apt-get update -y"
+run_with_spinner "Установка" "apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
+docker_version="$(docker --version 2>/dev/null || true)"
+compose_version="$(docker compose version 2>/dev/null || true)"
+docker_version_clean="$(extract_version "${docker_version}")"
+compose_version_clean="$(extract_version "${compose_version}")"
+check_output_installed "Docker" "${docker_version_clean}"
+check_output_installed "Docker Compose" "${compose_version_clean}"
+
+section "Запуск Docker"
+systemctl enable docker >> "${LOG_FILE}" 2>&1
+systemctl start docker >> "${LOG_FILE}" 2>&1
+check_service "docker"
+
+section "Авторизация в Docker Hub"
+login_output="$(echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USER}" --password-stdin 2>&1)"
+echo "${login_output}" >> "${LOG_FILE}" 2>&1
+if echo "${login_output}" | grep -qi "Login Succeeded"; then
+  ok "Login Succeeded"
 else
-  warn "Ошибка настройки Logrotate для Asterisk. Смотри лог: ${LOG_FILE}"
+  err "${login_output}"
+fi
+
+section "Запуск Redis и Postgres через Docker Compose"
+cd "${ROOT_DIR}"
+run_with_spinner "docker compose up" "docker compose up -d"
+docker compose ps >> "${LOG_FILE}" 2>&1
+if docker compose ps --services --filter status=running | grep -q '^redis$' \
+  && docker compose ps --services --filter status=running | grep -q '^postgres$'; then
+  ok "Redis и Postgres запущены"
+else
+  warn "Redis и Postgres не запущены. Смотри лог: ${LOG_FILE}"
 fi
 
 section "Установка сервиса Asterisk"
@@ -360,16 +361,18 @@ else
 fi
 fail2ban-client status >> "${LOG_FILE}" 2>&1 || true
 
-section "Запуск Redis и Postgres через Docker Compose"
-cd "${ROOT_DIR}"
-run_with_spinner "docker compose up" "docker compose up -d"
-docker compose ps >> "${LOG_FILE}" 2>&1
-if docker compose ps --services --filter status=running | grep -q '^redis$' \
-  && docker compose ps --services --filter status=running | grep -q '^postgres$'; then
-  ok "Redis и Postgres запущены"
-else
-  warn "Redis и Postgres не запущены. Смотри лог: ${LOG_FILE}"
-fi
+section "Установка Node.js (LTS 24.x)"
+run_with_spinner "Скачивание дистрибутива" "curl -fsSL https://deb.nodesource.com/setup_24.x | bash -"
+run_with_spinner "Установка" "apt-get install -y nodejs"
+node_version="$(node -v 2>/dev/null || true)"
+node_version_clean="$(extract_version "${node_version}")"
+check_output_installed "Node.js" "${node_version_clean}"
+
+section "Обновление npm"
+run_with_spinner "Обновление npm" "npm install -g npm@latest"
+npm_version="$(npm -v 2>/dev/null || true)"
+npm_version_clean="$(extract_version "${npm_version}")"
+check_output_installed "npm" "${npm_version_clean}"
 
 section "Установка и запуск сервера"
 mkdir -p /opt/intercom-backend

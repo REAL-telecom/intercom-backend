@@ -13,21 +13,22 @@ type AriBridge = {
 };
 
 /**
- * Build ARI REST base URL with basic auth.
+ * Build ARI REST base URL (no credentials in URL).
  */
 const buildBaseUrl = () => {
-  const user = encodeURIComponent(env.ariUser);
-  const pass = encodeURIComponent(env.ariPassword);
-  return `http://${user}:${pass}@${env.ariHost}:${env.ariPort}/ari`;
+  return `http://${env.ariHost}:${env.ariPort}/ari`;
 };
 
 /**
- * Build ARI WebSocket URL for events.
+ * Build ARI WebSocket URL for events (no credentials in URL).
  */
 const buildWsUrl = () => {
-  const user = encodeURIComponent(env.ariUser);
-  const pass = encodeURIComponent(env.ariPassword);
-  return `ws://${user}:${pass}@${env.ariHost}:${env.ariPort}/ari/events?app=${env.ariAppName}`;
+  return `ws://${env.ariHost}:${env.ariPort}/ari/events?app=${env.ariAppName}`;
+};
+
+const buildAuthHeader = () => {
+  const token = Buffer.from(`${env.ariUser}:${env.ariPassword}`).toString("base64");
+  return `Basic ${token}`;
 };
 
 /**
@@ -38,7 +39,11 @@ export const connectAriEvents = (onEvent: AriEventHandler) => {
   let current: WebSocket | null = null;
 
   const connect = () => {
-    const ws = new WebSocket(buildWsUrl());
+    const ws = new WebSocket(buildWsUrl(), {
+      headers: {
+        Authorization: buildAuthHeader(),
+      },
+    });
     current = ws;
 
     ws.on("open", () => {
@@ -82,6 +87,7 @@ const request = async <T = unknown>(path: string, method = "GET", body?: unknown
     method,
     headers: {
       "Content-Type": "application/json",
+      Authorization: buildAuthHeader(),
     },
   };
   if (body !== undefined) {
