@@ -98,7 +98,23 @@ const request = async <T = unknown>(path: string, method = "GET", body?: unknown
     const text = await res.text();
     throw new Error(`ARI request failed: ${res.status} ${text}`);
   }
-  return res.json() as Promise<T>;
+
+  // Many ARI endpoints (e.g. /channels/{id}/hold) return 204 No Content.
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
+  const text = await res.text();
+  if (!text) {
+    return undefined as T;
+  }
+
+  // Prefer JSON parsing when possible, but don't assume every successful response has JSON.
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return text as unknown as T;
+  }
 };
 
 /**
