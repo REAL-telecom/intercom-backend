@@ -38,7 +38,7 @@ ensureSchema()
   .then(() => ensurePjsipTemplates())
   .then(() => ensureUser(env.realphone))
   .catch((error) => {
-    app.log.error({ error }, "Failed to ensure database schema");
+    app.log.error({ err: error }, "Failed to ensure database schema");
     process.exit(1);
   });
 
@@ -55,14 +55,19 @@ connectAriEvents(async (event) => {
         try {
           await addChannelToBridge(bridgeId, channel.id);
         } catch (error) {
-          app.log.warn({ error }, "Failed to add outgoing channel to bridge");
+          app.log.warn({ err: error }, "Failed to add outgoing channel to bridge");
         }
       }
       return;
     }
 
     try {
-      await holdChannel(channel.id);
+      // A call can be cancelled very fast; HOLD may fail (404/409). Push should still be attempted.
+      try {
+        await holdChannel(channel.id);
+      } catch (error) {
+        app.log.warn({ err: error }, "Failed to hold incoming channel");
+      }
 
       const callId = crypto.randomUUID();
       const callToken = crypto.randomUUID();
@@ -119,7 +124,7 @@ connectAriEvents(async (event) => {
         }))
       );
     } catch (error) {
-      app.log.error({ error }, "Failed to handle StasisStart");
+      app.log.error({ err: error }, "Failed to handle StasisStart");
     }
   }
 
@@ -137,7 +142,7 @@ connectAriEvents(async (event) => {
         await deleteEndpointSession(session.endpointId);
       }
     } catch (error) {
-      app.log.warn({ error }, "Failed to cleanup after StasisEnd");
+      app.log.warn({ err: error }, "Failed to cleanup after StasisEnd");
     }
   }
 });
@@ -176,7 +181,7 @@ const cleanupStaleEndpoints = async () => {
       }
     }
   } catch (error) {
-    app.log.warn({ error }, "Failed to cleanup stale endpoints");
+    app.log.warn({ err: error }, "Failed to cleanup stale endpoints");
   }
 };
 

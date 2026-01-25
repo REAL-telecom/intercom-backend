@@ -4,8 +4,8 @@ maxretry = 5
 bantime = -1
 
 [asterisk]
-enabled = false
+enabled = true
 filter = asterisk
 logpath = /var/log/asterisk/messages
 backend = auto
-action = iptables-allports[name=ASTERISK]
+action = iptables-allports[name=ASTERISK, protocol=all]

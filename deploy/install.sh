@@ -183,6 +183,7 @@ section "Настройка firewall (ufw)"
 ufw allow ssh >> "${LOG_FILE}" 2>&1
 ufw allow 80/tcp >> "${LOG_FILE}" 2>&1
 ufw allow 443/tcp >> "${LOG_FILE}" 2>&1
+ufw allow 5060/udp >> "${LOG_FILE}" 2>&1
 ufw allow 8089/tcp >> "${LOG_FILE}" 2>&1
 ufw allow 10000:20000/udp >> "${LOG_FILE}" 2>&1
 ufw allow 3478/udp >> "${LOG_FILE}" 2>&1
@@ -285,6 +286,17 @@ if [[ -s /etc/asterisk/ari.conf ]] \
   ok "Файлы конфигураций успешно скопированы"
 else
   warn "Ошибка копирования файлов конфигурации Asterisk. Смотри лог: ${LOG_FILE}"
+fi
+
+section "Утилиты управления Asterisk-логами"
+mkdir -p /usr/local/bin
+if [[ -f "${CONFIG_DIR}/tools/asterisk-full-logs-on" ]] && [[ -f "${CONFIG_DIR}/tools/asterisk-full-logs-off" ]]; then
+  cp "${CONFIG_DIR}/tools/asterisk-full-logs-on" /usr/local/bin/asterisk-full-logs-on
+  cp "${CONFIG_DIR}/tools/asterisk-full-logs-off" /usr/local/bin/asterisk-full-logs-off
+  chmod +x /usr/local/bin/asterisk-full-logs-on /usr/local/bin/asterisk-full-logs-off
+  ok "Утилиты установлены: asterisk-full-logs-on/off"
+else
+  warn "Утилиты логов не найдены в репозитории (configs/tools). Смотри лог: ${LOG_FILE}"
 fi
 
 section "Настройка Coturn"
