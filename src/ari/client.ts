@@ -139,6 +139,13 @@ export const holdChannel = async (channelId: string) => {
 };
 
 /**
+ * Hangup channel (terminate call).
+ */
+export const hangupChannel = async (channelId: string) => {
+  return request(`/channels/${channelId}`, "DELETE");
+};
+
+/**
  * Originate outgoing call to endpoint.
  * appArgs may include metadata (e.g. bridge id).
  */

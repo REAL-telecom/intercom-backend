@@ -4,7 +4,7 @@ import { env } from "./config/env";
 import { ensureSchema, ensureUser, ensurePjsipTemplates } from "./store/postgres";
 import { registerPushRoutes } from "./routes/push";
 import { registerCallRoutes } from "./routes/calls";
-import { connectAriEvents, holdChannel, addChannelToBridge } from "./ari/client";
+import { connectAriEvents, holdChannel, addChannelToBridge, hangupChannel } from "./ari/client";
 import {
   listPushTokens,
   createTempSipEndpoint,
@@ -49,11 +49,12 @@ connectAriEvents(async (event) => {
   if (event.type === "StasisStart" && typeof event.channel === "object" && event.channel) {
     const channel = event.channel as { id?: string };
     if (!channel.id) return;
+    const channelId = channel.id;
     if (Array.isArray(event.args) && event.args[0] === "outgoing") {
       const bridgeId = String(event.args[1] ?? "");
       if (bridgeId) {
         try {
-          await addChannelToBridge(bridgeId, channel.id);
+          await addChannelToBridge(bridgeId, channelId);
         } catch (error) {
           app.log.warn({ err: error }, "Failed to add outgoing channel to bridge");
         }
@@ -64,7 +65,7 @@ connectAriEvents(async (event) => {
     try {
       // A call can be cancelled very fast; HOLD may fail (404/409). Push should still be attempted.
       try {
-        await holdChannel(channel.id);
+        await holdChannel(channelId);
       } catch (error) {
         app.log.warn({ err: error }, "Failed to hold incoming channel");
       }
@@ -86,7 +87,7 @@ connectAriEvents(async (event) => {
       await setCallToken(
         callToken,
         {
-          channelId: channel.id,
+          channelId,
           endpointId,
           credentials: {
             sipCredentials: {
@@ -102,7 +103,7 @@ connectAriEvents(async (event) => {
       await setEndpointSession(endpointId, { type: "call", token: callToken }, env.callTokenTtlSec);
 
       await setChannelSession(
-        channel.id,
+        channelId,
         { callToken, endpointId },
         env.callTokenTtlSec
       );
@@ -119,10 +120,36 @@ connectAriEvents(async (event) => {
           title: "Звонок в домофон",
           body: "Кто-то стоит у двери",
           data: { type: "SIP_CALL", callId, callToken },
-          sound: "default",
+          // iOS: play bundled custom sound; Android: sound is controlled by notification channel.
+          sound: "ringtone.wav",
+          channelId: "calls",
+          categoryId: "CALL",
           priority: "high",
         }))
       );
+
+      // If nobody answers, auto-end the call on backend after ring timeout.
+      void (async () => {
+        try {
+          await new Promise((r) => setTimeout(r, env.ringTimeoutSec * 1000));
+          const stillActive = await getCallToken(callToken);
+          if (!stillActive) return;
+
+          app.log.warn({ callToken, channelId }, "Incoming call timed out");
+          try {
+            await hangupChannel(channelId);
+          } catch (error) {
+            app.log.warn({ err: error, callToken, channelId }, "Failed to hangup timed out channel");
+          }
+
+          await deleteTempSipEndpoint(endpointId);
+          await deleteCallToken(callToken);
+          await deleteChannelSession(channelId);
+          await deleteEndpointSession(endpointId);
+        } catch (error) {
+          app.log.warn({ err: error, callToken }, "Failed to auto-end timed out call");
+        }
+      })();
     } catch (error) {
       app.log.error({ err: error }, "Failed to handle StasisStart");
     }

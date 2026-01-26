@@ -8,8 +8,10 @@ import {
   deleteOutgoingToken,
   setEndpointSession,
   deleteEndpointSession,
+  deleteCallToken,
+  deleteChannelSession,
 } from "../store/redis";
-import { createBridge, addChannelToBridge, originateCall } from "../ari/client";
+import { createBridge, addChannelToBridge, originateCall, hangupChannel } from "../ari/client";
 import { createTempSipEndpoint, deleteTempSipEndpoint } from "../store/postgres";
 
 type CallPayload = {
@@ -42,6 +44,50 @@ type OutgoingPayload = {
  * Also creates bridge and originates outbound call.
  */
 export const registerCallRoutes = async (app: FastifyInstance) => {
+  const endCallByToken = async (callToken: string) => {
+    const payload = await getCallToken<CallPayload>(callToken);
+    if (!payload) {
+      throw app.httpErrors.notFound("Invalid callToken");
+    }
+
+    try {
+      await hangupChannel(payload.channelId);
+    } catch (error) {
+      // Channel may already be gone; cleanup should still proceed.
+      app.log.warn({ err: error, callToken, channelId: payload.channelId }, "Failed to hangup channel");
+    }
+
+    await deleteTempSipEndpoint(payload.endpointId);
+    await deleteCallToken(callToken);
+    await deleteChannelSession(payload.channelId);
+    await deleteEndpointSession(payload.endpointId);
+  };
+
+  /**
+   * End incoming call (hangup channel + cleanup temp endpoint + cleanup tokens).
+   * Used by the mobile client on explicit reject/hangup.
+   */
+  app.post<{ Body: { callToken: string } }>("/calls/end", async (request) => {
+    const { callToken } = request.body ?? {};
+    if (!callToken) {
+      return app.httpErrors.badRequest("Missing callToken");
+    }
+
+    await endCallByToken(callToken);
+
+    return { ok: true };
+  });
+
+  // Backward-compatible alias for UI action naming.
+  app.post<{ Body: { callToken: string } }>("/calls/reject", async (request) => {
+    const { callToken } = request.body ?? {};
+    if (!callToken) {
+      return app.httpErrors.badRequest("Missing callToken");
+    }
+    await endCallByToken(callToken);
+    return { ok: true };
+  });
+
   app.get<{ Querystring: { callToken: string } }>(
     "/calls/credentials",
     async (request) => {
