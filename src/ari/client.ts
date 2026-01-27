@@ -133,6 +133,13 @@ export const addChannelToBridge = async (bridgeId: string, channelId: string) =>
 };
 
 /**
+ * Answer incoming channel (move from Ring to Up state).
+ */
+export const answerChannel = async (channelId: string) => {
+  return request(`/channels/${channelId}/answer`, "POST");
+};
+
+/**
  * Put incoming channel on hold while waiting for user.
  */
 export const holdChannel = async (channelId: string) => {

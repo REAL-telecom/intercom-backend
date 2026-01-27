@@ -6,6 +6,7 @@ import { registerPushRoutes } from "./routes/push";
 import { registerCallRoutes } from "./routes/calls";
 import {
   connectAriEvents,
+  answerChannel,
   holdChannel,
   addChannelToBridge,
   hangupChannel,
@@ -161,6 +162,15 @@ connectAriEvents(async (event) => {
     }
 
     try {
+      // Answer the incoming channel to move it from Ring to Up state
+      // This is required for the call to be established properly
+      try {
+        await answerChannel(channelId);
+        app.log.info({ channelId }, "Answered incoming channel");
+      } catch (error) {
+        app.log.warn({ err: error }, "Failed to answer incoming channel");
+      }
+
       // A call can be cancelled very fast; HOLD may fail (404/409). Push should still be attempted.
       try {
         await holdChannel(channelId);
