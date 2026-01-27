@@ -13,6 +13,7 @@ import {
 } from "../store/redis";
 import { createBridge, addChannelToBridge, originateCall, hangupChannel } from "../ari/client";
 import { createTempSipEndpoint, deleteTempSipEndpoint } from "../store/postgres";
+import { setPendingOriginate, deletePendingOriginate } from "../store/redis";
 
 type CallPayload = {
   channelId: string;
@@ -100,36 +101,20 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
         return app.httpErrors.notFound("Invalid callToken");
       }
 
-      // Return credentials immediately. ARI actions may fail transiently (e.g. channel ended,
-      // endpoint not registered yet). We try in background to avoid failing the client with 500.
+      // Return credentials immediately. Originate will be triggered when endpoint registers.
       const credentials = payload.credentials;
 
-      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
       void (async () => {
         try {
           const bridge = await createBridge();
           await addChannelToBridge(bridge.id, payload.channelId);
 
-          // Give the client a short head start to register, then retry originate for a few seconds.
-          await sleep(500);
-          const endpoint = `PJSIP/${payload.endpointId}`;
-          const appArgs = `outgoing,${bridge.id}`;
-
-          const deadlineMs = Date.now() + env.ringTimeoutSec * 1000;
-          // Retry until ring timeout (or success).
-          // eslint-disable-next-line no-constant-condition
-          while (true) {
-            try {
-              await originateCall(endpoint, appArgs);
-              return;
-            } catch (error) {
-              if (Date.now() >= deadlineMs) {
-                app.log.warn({ err: error, callToken, endpoint }, "Originate timed out");
-                return;
-              }
-              await sleep(500);
-            }
-          }
+          // Store pending originate - will be triggered when endpoint becomes online
+          await setPendingOriginate(
+            payload.endpointId,
+            { bridgeId: bridge.id, channelId: payload.channelId },
+            env.ringTimeoutSec
+          );
         } catch (error) {
           app.log.warn({ err: error, callToken }, "Failed to setup bridge/originate");
         }

@@ -122,4 +122,34 @@ export const deleteChannelSession = async (channelId: string) => {
   await redis.del(key);
 };
 
+/**
+ * Store pending originate request for endpoint.
+ * When endpoint becomes online, originate will be triggered.
+ */
+export const setPendingOriginate = async (
+  endpointId: string,
+  payload: { bridgeId: string; channelId: string },
+  ttlSec: number
+) => {
+  const key = `originate:${endpointId}`;
+  await redis.set(key, JSON.stringify(payload), "EX", ttlSec);
+};
+
+/**
+ * Load pending originate request.
+ */
+export const getPendingOriginate = async <T>(endpointId: string) => {
+  const key = `originate:${endpointId}`;
+  const value = await redis.get(key);
+  return value ? (JSON.parse(value) as T) : null;
+};
+
+/**
+ * Remove pending originate after it's been processed.
+ */
+export const deletePendingOriginate = async (endpointId: string) => {
+  const key = `originate:${endpointId}`;
+  await redis.del(key);
+};
+
 export const redisClient = redis;

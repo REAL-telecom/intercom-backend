@@ -163,3 +163,26 @@ export const originateCall = async (endpoint: string, appArgs: string) => {
 export const deleteBridge = async (bridgeId: string) => {
   return request(`/bridges/${bridgeId}`, "DELETE");
 };
+
+/**
+ * Subscribe ARI application to endpoint events.
+ * Required to receive EndpointStateChange events.
+ * Subscribes to all PJSIP endpoints.
+ */
+export const subscribeToEndpointEvents = async () => {
+  // Subscribe to all PJSIP endpoints using query parameter
+  const res = await fetch(
+    `${buildBaseUrl()}/applications/${env.ariAppName}/subscription?eventSource=endpoint:PJSIP`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: buildAuthHeader(),
+      },
+    }
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Failed to subscribe to endpoint events: ${res.status} ${text}`);
+  }
+  return undefined;
+};

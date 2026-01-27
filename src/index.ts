@@ -4,7 +4,14 @@ import { env } from "./config/env";
 import { ensureSchema, ensureUser, ensurePjsipTemplates } from "./store/postgres";
 import { registerPushRoutes } from "./routes/push";
 import { registerCallRoutes } from "./routes/calls";
-import { connectAriEvents, holdChannel, addChannelToBridge, hangupChannel } from "./ari/client";
+import {
+  connectAriEvents,
+  holdChannel,
+  addChannelToBridge,
+  hangupChannel,
+  subscribeToEndpointEvents,
+  originateCall,
+} from "./ari/client";
 import {
   listPushTokens,
   createTempSipEndpoint,
@@ -22,6 +29,8 @@ import {
   deleteEndpointSession,
   getCallToken,
   getOutgoingToken,
+  getPendingOriginate,
+  deletePendingOriginate,
 } from "./store/redis";
 import { sendExpoPush } from "./push/expo";
 import crypto from "crypto";
@@ -45,7 +54,52 @@ ensureSchema()
 registerPushRoutes(app);
 registerCallRoutes(app);
 
+// Subscribe to endpoint events to receive EndpointStateChange
+subscribeToEndpointEvents().catch((error) => {
+  app.log.error({ err: error }, "Failed to subscribe to endpoint events");
+});
+
 connectAriEvents(async (event) => {
+  // Handle endpoint registration - trigger originate when endpoint becomes online
+  if (event.type === "EndpointStateChange") {
+    // Endpoint can be either string (resource ID) or object with resource/state
+    let endpointId: string | null = null;
+    let state: string | null = null;
+
+    if (typeof event.endpoint === "string") {
+      // Format: "PJSIP/endpointId"
+      const match = event.endpoint.match(/^PJSIP\/(.+)$/);
+      if (match) {
+        endpointId = match[1];
+      }
+      state = (event as { endpoint_state?: string }).endpoint_state || null;
+    } else if (typeof event.endpoint === "object" && event.endpoint) {
+      const ep = event.endpoint as { resource?: string; state?: string };
+      if (ep.resource) {
+        const match = ep.resource.match(/^PJSIP\/(.+)$/);
+        if (match) {
+          endpointId = match[1];
+        }
+      }
+      state = ep.state || null;
+    }
+
+    if (endpointId && state === "online") {
+      const pending = await getPendingOriginate<{ bridgeId: string; channelId: string }>(endpointId);
+      if (pending) {
+        try {
+          const appArgs = `outgoing,${pending.bridgeId}`;
+          await originateCall(`PJSIP/${endpointId}`, appArgs);
+          await deletePendingOriginate(endpointId);
+          app.log.info({ endpointId, bridgeId: pending.bridgeId }, "Originated call after endpoint registration");
+        } catch (error) {
+          app.log.warn({ err: error, endpointId }, "Failed to originate after endpoint registration");
+        }
+      }
+    }
+  }
+
+  if (event.type === "StasisStart" && typeof event.channel === "object" && event.channel) {
   if (event.type === "StasisStart" && typeof event.channel === "object" && event.channel) {
     const channel = event.channel as { id?: string };
     if (!channel.id) return;
