@@ -129,10 +129,16 @@ export const createBridge = async () => {
 };
 
 /**
- * Add channel to existing bridge.
+ * Add channel to existing bridge with explicit parameters.
  */
 export const addChannelToBridge = async (bridgeId: string, channelId: string) => {
-  return request(`/bridges/${bridgeId}/addChannel`, "POST", { channel: channelId });
+  return request(`/bridges/${bridgeId}/addChannel`, "POST", { 
+    channel: channelId,
+    // Явно указываем параметры для правильного соединения
+    role: "participant",
+    absorbDTMF: false,
+    mute: false
+  });
 };
 
 /**
@@ -157,7 +163,7 @@ export const hangupChannel = async (channelId: string) => {
 };
 
 /**
- * Originate outgoing call to endpoint.
+ * Originate outgoing call to endpoint with explicit parameters.
  * appArgs may include metadata (e.g. bridge id).
  */
 export const originateCall = async (endpoint: string, appArgs: string) => {
@@ -165,6 +171,14 @@ export const originateCall = async (endpoint: string, appArgs: string) => {
     endpoint,
     app: env.ariAppName,
     appArgs,
+    // Явно указываем параметры для правильного соединения
+    channelId: undefined, // Let Asterisk generate
+    callerId: undefined, // Use default
+    timeout: 30, // Timeout for originate
+    variables: {}, // No additional variables
+    originator: undefined, // No originator channel
+    otherChannelId: undefined, // No other channel
+    formats: undefined, // Use endpoint's allowed formats
   });
 };
 
@@ -181,6 +195,15 @@ export const deleteBridge = async (bridgeId: string) => {
 export const getEndpointStatus = async (tech: string, resource: string) => {
   return request<{ technology: string; resource: string; state: string; channel_ids: string[] }>(
     `/endpoints/${tech}/${resource}`
+  );
+};
+
+/**
+ * Get channel information including state.
+ */
+export const getChannel = async (channelId: string) => {
+  return request<{ id: string; state: string; name: string; caller: { number: string }; connected: { number: string } }>(
+    `/channels/${channelId}`
   );
 };
 

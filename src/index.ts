@@ -153,10 +153,27 @@ connectAriEvents(async (event) => {
       const bridgeId = String(event.args[1] ?? "");
       if (bridgeId) {
         try {
+          app.log.info({ channelId, bridgeId }, "Processing outgoing channel - adding to bridge");
+          
+          // Даем каналу время инициализироваться
+          await new Promise((r) => setTimeout(r, 200));
+          
+          // Добавляем канал в bridge
           await addChannelToBridge(bridgeId, channelId);
+          app.log.info({ channelId, bridgeId }, "Outgoing channel successfully added to bridge - call should be connected");
         } catch (error) {
-          app.log.warn({ err: error }, "Failed to add outgoing channel to bridge");
+          app.log.error({ err: error, channelId, bridgeId }, "CRITICAL: Failed to add outgoing channel to bridge - call will not connect");
+          // Пытаемся еще раз через небольшую задержку
+          try {
+            await new Promise((r) => setTimeout(r, 500));
+            await addChannelToBridge(bridgeId, channelId);
+            app.log.info({ channelId, bridgeId }, "Outgoing channel added to bridge on retry");
+          } catch (retryError) {
+            app.log.error({ err: retryError, channelId, bridgeId }, "CRITICAL: Retry also failed - call connection failed");
+          }
         }
+      } else {
+        app.log.error({ channelId, args: event.args }, "CRITICAL: No bridgeId in outgoing channel args");
       }
       return;
     }
@@ -164,12 +181,14 @@ connectAriEvents(async (event) => {
     try {
       // Answer the incoming channel to move it from Ring to Up state
       // This is required for the call to be established properly
-      // НЕ ставим на hold - это может сбросить состояние канала
       try {
         await answerChannel(channelId);
         app.log.info({ channelId }, "Answered incoming channel");
+        // Даем время каналу перейти в состояние Up
+        await new Promise((r) => setTimeout(r, 100));
       } catch (error) {
-        app.log.warn({ err: error }, "Failed to answer incoming channel");
+        app.log.error({ err: error, channelId }, "Failed to answer incoming channel");
+        return; // Не продолжаем, если не удалось ответить
       }
 
       const callId = crypto.randomUUID();

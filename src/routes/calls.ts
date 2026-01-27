@@ -103,8 +103,18 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
 
       void (async () => {
         try {
+          app.log.info({ callToken, channelId: payload.channelId, endpointId: payload.endpointId }, "STEP 1: Creating bridge and setting up originate");
+          
+          // Создаем bridge с поддержкой видео
           const bridge = await createBridge();
+          app.log.info({ bridgeId: bridge.id, channelId: payload.channelId }, "STEP 2: Bridge created, adding incoming domophone channel");
+          
+          // Даем каналу домофона время быть в состоянии Up
+          await new Promise((r) => setTimeout(r, 300));
+          
+          // Добавляем канал домофона в bridge
           await addChannelToBridge(bridge.id, payload.channelId);
+          app.log.info({ bridgeId: bridge.id, channelId: payload.channelId }, "STEP 3: Incoming domophone channel added to bridge");
 
           // Store pending originate - will be triggered when endpoint becomes online
           await setPendingOriginate(
@@ -112,8 +122,9 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
             { bridgeId: bridge.id, channelId: payload.channelId },
             env.ringTimeoutSec
           );
+          app.log.info({ endpointId: payload.endpointId, bridgeId: bridge.id }, "STEP 4: Pending originate stored, waiting for endpoint registration. When client registers, originate will be called and client channel will be added to bridge.");
         } catch (error) {
-          app.log.warn({ err: error, callToken }, "Failed to setup bridge/originate");
+          app.log.error({ err: error, callToken, channelId: payload.channelId, endpointId: payload.endpointId }, "CRITICAL: Failed to setup bridge/originate - call will not connect");
         }
       })();
 
