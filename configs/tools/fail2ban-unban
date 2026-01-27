@@ -1,0 +1,28 @@
+#!/bin/bash
+# Скрипт для разбана IP и добавления в белый список fail2ban
+
+if [ -z "$1" ]; then
+    echo "Использование: $0 <IP_ADDRESS>"
+    echo "Пример: $0 5.39.53.85"
+    exit 1
+fi
+
+IP=$1
+
+echo "Разбаниваю IP: $IP"
+sudo fail2ban-client set asterisk unbanip "$IP"
+
+if [ $? -eq 0 ]; then
+    echo "✓ IP $IP разбанен"
+else
+    echo "✗ Ошибка при разбане. Попробуйте:"
+    echo "  sudo iptables -D f2b-ASTERISK -s $IP -j REJECT --reject-with icmp-port-unreachable"
+    exit 1
+fi
+
+echo ""
+echo "Добавляю IP в белый список (ignoreip)..."
+echo "ВАЖНО: Добавьте IP $IP в файл /etc/fail2ban/jail.local в секцию [asterisk]:"
+echo "  ignoreip = 127.0.0.1/8 ::1 $IP"
+echo ""
+echo "Затем выполните: sudo fail2ban-client reload asterisk"

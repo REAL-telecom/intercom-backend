@@ -7,6 +7,7 @@ import {
   getOutgoingToken,
   deleteOutgoingToken,
   setEndpointSession,
+  getEndpointSession,
   deleteEndpointSession,
   deleteCallToken,
   deleteChannelSession,
@@ -58,10 +59,28 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
       app.log.warn({ err: error, callToken, channelId: payload.channelId }, "Failed to hangup channel");
     }
 
-    await deleteTempSipEndpoint(payload.endpointId);
+    // Удаляем токены и сессии сразу
     await deleteCallToken(callToken);
     await deleteChannelSession(payload.channelId);
-    await deleteEndpointSession(payload.endpointId);
+    
+    // Endpoint удаляем с задержкой - даем время для возможной повторной регистрации
+    void (async () => {
+      try {
+        await new Promise((r) => setTimeout(r, 60000)); // 60 секунд задержка
+        // Проверяем, что endpoint все еще не используется
+        const stillExists = await getEndpointSession(payload.endpointId);
+        if (stillExists) {
+          const token = await getCallToken(callToken);
+          if (!token) {
+            // Токен удален, можно безопасно удалить endpoint
+            await deleteTempSipEndpoint(payload.endpointId);
+            await deleteEndpointSession(payload.endpointId);
+          }
+        }
+      } catch (error) {
+        app.log.warn({ err: error, endpointId: payload.endpointId }, "Failed to delayed cleanup endpoint");
+      }
+    })();
   };
 
   /**

@@ -164,18 +164,12 @@ connectAriEvents(async (event) => {
     try {
       // Answer the incoming channel to move it from Ring to Up state
       // This is required for the call to be established properly
+      // НЕ ставим на hold - это может сбросить состояние канала
       try {
         await answerChannel(channelId);
         app.log.info({ channelId }, "Answered incoming channel");
       } catch (error) {
         app.log.warn({ err: error }, "Failed to answer incoming channel");
-      }
-
-      // A call can be cancelled very fast; HOLD may fail (404/409). Push should still be attempted.
-      try {
-        await holdChannel(channelId);
-      } catch (error) {
-        app.log.warn({ err: error }, "Failed to hold incoming channel");
       }
 
       const callId = crypto.randomUUID();
@@ -276,10 +270,30 @@ connectAriEvents(async (event) => {
         channel.id
       );
       if (session) {
-        await deleteTempSipEndpoint(session.endpointId);
+        // Не удаляем endpoint сразу - даем время для возможной повторной регистрации
+        // Удаляем через 60 секунд после завершения звонка
+        void (async () => {
+          try {
+            await new Promise((r) => setTimeout(r, 60000)); // 60 секунд задержка
+            // Проверяем, что endpoint все еще не используется
+            const stillExists = await getEndpointSession(session.endpointId);
+            if (stillExists) {
+              // Если все еще есть сессия, проверяем, активна ли она
+              const token = await getCallToken(session.callToken);
+              if (!token) {
+                // Токен удален, можно безопасно удалить endpoint
+                await deleteTempSipEndpoint(session.endpointId);
+                await deleteEndpointSession(session.endpointId);
+              }
+            }
+          } catch (error) {
+            app.log.warn({ err: error, endpointId: session.endpointId }, "Failed to delayed cleanup endpoint");
+          }
+        })();
+        
+        // Токены и сессии канала можно удалить сразу
         await deleteCallToken(session.callToken);
         await deleteChannelSession(channel.id);
-        await deleteEndpointSession(session.endpointId);
       }
     } catch (error) {
       app.log.warn({ err: error }, "Failed to cleanup after StasisEnd");
