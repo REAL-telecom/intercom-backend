@@ -119,10 +119,13 @@ const request = async <T = unknown>(path: string, method = "GET", body?: unknown
 };
 
 /**
- * Create mixing bridge for call.
+ * Create mixing bridge for call with video support.
  */
 export const createBridge = async () => {
-  return request<AriBridge>("/bridges", "POST", { type: "mixing" });
+  return request<AriBridge>("/bridges", "POST", { 
+    type: "mixing",
+    videoMode: "talker" // Enable video in bridge
+  });
 };
 
 /**

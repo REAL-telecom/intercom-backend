@@ -248,11 +248,7 @@ connectAriEvents(async (event) => {
           } catch (error) {
             app.log.warn({ err: error, callToken, channelId }, "Failed to hangup timed out channel");
           }
-
-          await deleteTempSipEndpoint(endpointId);
-          await deleteCallToken(callToken);
-          await deleteChannelSession(channelId);
-          await deleteEndpointSession(endpointId);
+          // Не удаляем данные - Redis очистит их автоматически по TTL
         } catch (error) {
           app.log.warn({ err: error, callToken }, "Failed to auto-end timed out call");
         }
@@ -265,39 +261,8 @@ connectAriEvents(async (event) => {
   if (event.type === "StasisEnd" && typeof event.channel === "object" && event.channel) {
     const channel = event.channel as { id?: string };
     if (!channel.id) return;
-    try {
-      const session = await getChannelSession<{ callToken: string; endpointId: string }>(
-        channel.id
-      );
-      if (session) {
-        // Не удаляем endpoint сразу - даем время для возможной повторной регистрации
-        // Удаляем через 60 секунд после завершения звонка
-        void (async () => {
-          try {
-            await new Promise((r) => setTimeout(r, 60000)); // 60 секунд задержка
-            // Проверяем, что endpoint все еще не используется
-            const stillExists = await getEndpointSession(session.endpointId);
-            if (stillExists) {
-              // Если все еще есть сессия, проверяем, активна ли она
-              const token = await getCallToken(session.callToken);
-              if (!token) {
-                // Токен удален, можно безопасно удалить endpoint
-                await deleteTempSipEndpoint(session.endpointId);
-                await deleteEndpointSession(session.endpointId);
-              }
-            }
-          } catch (error) {
-            app.log.warn({ err: error, endpointId: session.endpointId }, "Failed to delayed cleanup endpoint");
-          }
-        })();
-        
-        // Токены и сессии канала можно удалить сразу
-        await deleteCallToken(session.callToken);
-        await deleteChannelSession(channel.id);
-      }
-    } catch (error) {
-      app.log.warn({ err: error }, "Failed to cleanup after StasisEnd");
-    }
+    // Не удаляем данные - Redis очистит их автоматически по TTL
+    app.log.debug({ channelId: channel.id }, "StasisEnd - relying on Redis TTL for cleanup");
   }
 });
 
@@ -306,7 +271,8 @@ app.get("/health", async () => {
 });
 
 /**
- * Cleanup temporary endpoints without active tokens.
+ * Cleanup temporary endpoints from PostgreSQL if Redis TTL expired.
+ * Redis очищает данные автоматически по TTL, здесь только очищаем PostgreSQL.
  */
 const cleanupStaleEndpoints = async () => {
   try {
@@ -315,22 +281,39 @@ const cleanupStaleEndpoints = async () => {
       const session = await getEndpointSession<{ type: "call" | "outgoing"; token: string }>(
         endpointId
       );
+      // Если в Redis нет сессии, значит TTL истек - удаляем из PostgreSQL
       if (!session) {
-        await deleteTempSipEndpoint(endpointId);
+        try {
+          await deleteTempSipEndpoint(endpointId);
+          app.log.debug({ endpointId }, "Cleaned up stale endpoint from PostgreSQL");
+        } catch (error) {
+          app.log.warn({ err: error, endpointId }, "Failed to delete stale endpoint from PostgreSQL");
+        }
         continue;
       }
 
+      // Проверяем, истек ли токен в Redis
       if (session.type === "call") {
         const token = await getCallToken(session.token);
         if (!token) {
-          await deleteTempSipEndpoint(endpointId);
-          await deleteEndpointSession(endpointId);
+          // Токен истек в Redis - удаляем из PostgreSQL
+          try {
+            await deleteTempSipEndpoint(endpointId);
+            app.log.debug({ endpointId }, "Cleaned up endpoint after call token expired");
+          } catch (error) {
+            app.log.warn({ err: error, endpointId }, "Failed to delete endpoint from PostgreSQL");
+          }
         }
       } else {
         const token = await getOutgoingToken(session.token);
         if (!token) {
-          await deleteTempSipEndpoint(endpointId);
-          await deleteEndpointSession(endpointId);
+          // Токен истек в Redis - удаляем из PostgreSQL
+          try {
+            await deleteTempSipEndpoint(endpointId);
+            app.log.debug({ endpointId }, "Cleaned up endpoint after outgoing token expired");
+          } catch (error) {
+            app.log.warn({ err: error, endpointId }, "Failed to delete endpoint from PostgreSQL");
+          }
         }
       }
     }

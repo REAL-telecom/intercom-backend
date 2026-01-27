@@ -58,29 +58,7 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
       // Channel may already be gone; cleanup should still proceed.
       app.log.warn({ err: error, callToken, channelId: payload.channelId }, "Failed to hangup channel");
     }
-
-    // Удаляем токены и сессии сразу
-    await deleteCallToken(callToken);
-    await deleteChannelSession(payload.channelId);
-    
-    // Endpoint удаляем с задержкой - даем время для возможной повторной регистрации
-    void (async () => {
-      try {
-        await new Promise((r) => setTimeout(r, 60000)); // 60 секунд задержка
-        // Проверяем, что endpoint все еще не используется
-        const stillExists = await getEndpointSession(payload.endpointId);
-        if (stillExists) {
-          const token = await getCallToken(callToken);
-          if (!token) {
-            // Токен удален, можно безопасно удалить endpoint
-            await deleteTempSipEndpoint(payload.endpointId);
-            await deleteEndpointSession(payload.endpointId);
-          }
-        }
-      } catch (error) {
-        app.log.warn({ err: error, endpointId: payload.endpointId }, "Failed to delayed cleanup endpoint");
-      }
-    })();
+    // Не удаляем данные - Redis очистит их автоматически по TTL
   };
 
   /**
@@ -197,10 +175,13 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
         return app.httpErrors.notFound("Invalid outgoingToken");
       }
 
-      await deleteTempSipEndpoint(payload.endpointId);
-      await deleteOutgoingToken(outgoingToken);
-      await deleteEndpointSession(payload.endpointId);
-
+      // Не удаляем данные - Redis очистит их автоматически по TTL
+      // Удаляем только из PostgreSQL, если нужно
+      try {
+        await deleteTempSipEndpoint(payload.endpointId);
+      } catch (error) {
+        app.log.warn({ err: error, endpointId: payload.endpointId }, "Failed to delete endpoint from PostgreSQL");
+      }
       return { ok: true };
     }
   );
