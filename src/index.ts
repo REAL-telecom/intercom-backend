@@ -70,18 +70,18 @@ connectAriEvents(async (event) => {
       // Format: "PJSIP/endpointId"
       const match = event.endpoint.match(/^PJSIP\/(.+)$/);
       if (match) {
-        endpointId = match[1];
+        endpointId = match[1] ?? null;
       }
-      state = (event as { endpoint_state?: string }).endpoint_state || null;
+      state = (event as { endpoint_state?: string }).endpoint_state ?? null;
     } else if (typeof event.endpoint === "object" && event.endpoint) {
       const ep = event.endpoint as { resource?: string; state?: string };
       if (ep.resource) {
         const match = ep.resource.match(/^PJSIP\/(.+)$/);
         if (match) {
-          endpointId = match[1];
+          endpointId = match[1] ?? null;
         }
       }
-      state = ep.state || null;
+      state = ep.state ?? null;
     }
 
     if (endpointId && state === "online") {
@@ -99,7 +99,6 @@ connectAriEvents(async (event) => {
     }
   }
 
-  if (event.type === "StasisStart" && typeof event.channel === "object" && event.channel) {
   if (event.type === "StasisStart" && typeof event.channel === "object" && event.channel) {
     const channel = event.channel as { id?: string };
     if (!channel.id) return;
