@@ -62,6 +62,9 @@ subscribeToEndpointEvents().catch((error) => {
 connectAriEvents(async (event) => {
   // Handle endpoint registration - trigger originate when endpoint becomes online
   if (event.type === "EndpointStateChange") {
+    // Log ALL EndpointStateChange events to debug
+    app.log.info({ event: JSON.stringify(event) }, "EndpointStateChange event received");
+
     // Endpoint can be either string (resource ID) or object with resource/state
     let endpointId: string | null = null;
     let state: string | null = null;
@@ -83,6 +86,8 @@ connectAriEvents(async (event) => {
       }
       state = ep.state ?? null;
     }
+
+    app.log.info({ endpointId, state }, "Parsed EndpointStateChange");
 
     if (endpointId && state === "online") {
       const pending = await getPendingOriginate<{ bridgeId: string; channelId: string }>(endpointId);
