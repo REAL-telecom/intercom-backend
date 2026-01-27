@@ -70,19 +70,17 @@ connectAriEvents(async (event) => {
     let state: string | null = null;
 
     if (typeof event.endpoint === "string") {
-      // Format: "PJSIP/endpointId"
-      const match = event.endpoint.match(/^PJSIP\/(.+)$/);
+      // Format: "PJSIP/endpointId" or just "endpointId"
+      const match = event.endpoint.match(/^(?:PJSIP\/)?(.+)$/);
       if (match) {
         endpointId = match[1] ?? null;
       }
       state = (event as { endpoint_state?: string }).endpoint_state ?? null;
     } else if (typeof event.endpoint === "object" && event.endpoint) {
-      const ep = event.endpoint as { resource?: string; state?: string };
+      const ep = event.endpoint as { resource?: string; state?: string; technology?: string };
+      // resource already contains just the endpoint ID (e.g. "tmp_xxx"), not "PJSIP/tmp_xxx"
       if (ep.resource) {
-        const match = ep.resource.match(/^PJSIP\/(.+)$/);
-        if (match) {
-          endpointId = match[1] ?? null;
-        }
+        endpointId = ep.resource;
       }
       state = ep.state ?? null;
     }
