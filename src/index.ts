@@ -68,24 +68,47 @@ subscribeToEndpointEvents()
 
 connectAriEvents(async (event) => {
   // Log all events for debugging
-  app.log.debug({ eventType: event.type, event: JSON.stringify(event) }, "ARI event received");
+пше   app.log.info({ eventType: event.type, fullEvent: JSON.stringify(event, null, 2) }, "ARI event received");
 
   // Handle EndpointStateChange events for temporary endpoints
   // When endpoint state changes, try to originate if there's a pending call
   // This works similar to how Linphone SDK detects registration - by attempting to use the endpoint
   if (event.type === "EndpointStateChange") {
+    // Log complete event with all fields
+    app.log.info({ 
+      fullEvent: JSON.stringify(event, null, 2),
+      eventKeys: Object.keys(event),
+      endpointRaw: event.endpoint
+    }, "EndpointStateChange event - COMPLETE DATA");
+    
     const ep = event.endpoint;
-    app.log.info({ endpoint: ep, fullEvent: JSON.stringify(event) }, "EndpointStateChange event - full data");
     
     if (typeof ep === "object" && ep !== null) {
-      const endpoint = ep as { technology?: string; resource?: string; state?: string };
-      app.log.info({ technology: endpoint.technology, resource: endpoint.resource, state: endpoint.state }, "EndpointStateChange parsed");
+      // Log all endpoint fields
+      app.log.info({ 
+        endpointType: typeof ep,
+        endpointKeys: Object.keys(ep),
+        endpointFull: JSON.stringify(ep, null, 2),
+        technology: (ep as any).technology,
+        resource: (ep as any).resource,
+        state: (ep as any).state,
+        channel_ids: (ep as any).channel_ids,
+        allFields: ep
+      }, "EndpointStateChange - parsed endpoint with ALL fields");
+      
+      const endpoint = ep as { technology?: string; resource?: string; state?: string; channel_ids?: string[]; [key: string]: any };
       
       if (endpoint.technology === "PJSIP" && endpoint.resource?.startsWith("tmp_")) {
         const endpointId = endpoint.resource;
         const state = endpoint.state ?? null;
 
-        app.log.info({ endpointId, state, fullEndpointData: JSON.stringify(endpoint) }, "EndpointStateChange received for temporary endpoint");
+        app.log.info({ 
+          endpointId, 
+          state, 
+          channel_ids: endpoint.channel_ids,
+          fullEndpointData: JSON.stringify(endpoint, null, 2),
+          allEndpointFields: endpoint
+        }, "EndpointStateChange received for temporary endpoint - ALL DATA");
 
         // Check if there's a pending originate for this endpoint
         const pending = await getPendingOriginate<{ bridgeId: string; channelId: string }>(
