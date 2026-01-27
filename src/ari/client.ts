@@ -165,6 +165,15 @@ export const deleteBridge = async (bridgeId: string) => {
 };
 
 /**
+ * Get endpoint status (online/offline/unknown).
+ */
+export const getEndpointStatus = async (tech: string, resource: string) => {
+  return request<{ technology: string; resource: string; state: string; channel_ids: string[] }>(
+    `/endpoints/${tech}/${resource}`
+  );
+};
+
+/**
  * Subscribe ARI application to endpoint events.
  * Required to receive EndpointStateChange events.
  * Subscribes to all PJSIP endpoints.

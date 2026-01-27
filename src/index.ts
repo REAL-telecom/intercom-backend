@@ -54,52 +54,47 @@ ensureSchema()
 registerPushRoutes(app);
 registerCallRoutes(app);
 
-// Subscribe to endpoint events to receive EndpointStateChange
+// Subscribe to endpoint events to receive EndpointStateChange events
 subscribeToEndpointEvents().catch((error) => {
-  app.log.error({ err: error }, "Failed to subscribe to endpoint events");
+  app.log.warn({ err: error }, "Failed to subscribe to endpoint events");
 });
 
 connectAriEvents(async (event) => {
-  // Handle endpoint registration - trigger originate when endpoint becomes online
+  // Handle EndpointStateChange events for temporary endpoints
+  // When endpoint state changes, try to originate if there's a pending call
+  // This works similar to how Linphone SDK detects registration - by attempting to use the endpoint
   if (event.type === "EndpointStateChange") {
-    // Log ALL EndpointStateChange events to debug
-    app.log.info({ event: JSON.stringify(event) }, "EndpointStateChange event received");
+    const ep = event.endpoint;
+    if (typeof ep === "object" && ep !== null) {
+      const endpoint = ep as { technology?: string; resource?: string; state?: string };
+      if (endpoint.technology === "PJSIP" && endpoint.resource?.startsWith("tmp_")) {
+        const endpointId = endpoint.resource;
+        const state = endpoint.state ?? null;
 
-    // Endpoint can be either string (resource ID) or object with resource/state
-    let endpointId: string | null = null;
-    let state: string | null = null;
+        // Check if there's a pending originate for this endpoint
+        const pending = await getPendingOriginate<{ bridgeId: string; channelId: string }>(
+          endpointId
+        );
 
-    if (typeof event.endpoint === "string") {
-      // Format: "PJSIP/endpointId" or just "endpointId"
-      const match = event.endpoint.match(/^(?:PJSIP\/)?(.+)$/);
-      if (match) {
-        endpointId = match[1] ?? null;
-      }
-      state = (event as { endpoint_state?: string }).endpoint_state ?? null;
-    } else if (typeof event.endpoint === "object" && event.endpoint) {
-      const ep = event.endpoint as { resource?: string; state?: string; technology?: string };
-      // resource already contains just the endpoint ID (e.g. "tmp_xxx"), not "PJSIP/tmp_xxx"
-      if (ep.resource) {
-        endpointId = ep.resource;
-      }
-      state = ep.state ?? null;
-    }
-
-    app.log.info({ endpointId, state }, "Parsed EndpointStateChange");
-
-    if (endpointId && state === "online") {
-      const pending = await getPendingOriginate<{ bridgeId: string; channelId: string }>(endpointId);
-      if (pending) {
-        try {
-          const appArgs = `outgoing,${pending.bridgeId}`;
-          await originateCall(`PJSIP/${endpointId}`, appArgs);
-          await deletePendingOriginate(endpointId);
-          app.log.info({ endpointId, bridgeId: pending.bridgeId }, "Originated call after endpoint registration");
-        } catch (error) {
-          app.log.warn({ err: error, endpointId }, "Failed to originate after endpoint registration");
+        if (pending) {
+          // Try to originate regardless of state
+          // If endpoint is registered, originate will succeed
+          // If not, it will fail and we'll retry on next state change
+          // This mimics how Linphone SDK works - it knows registration succeeded when it can use the endpoint
+          try {
+            const appArgs = `outgoing,${pending.bridgeId}`;
+            await originateCall(`PJSIP/${endpointId}`, appArgs);
+            await deletePendingOriginate(endpointId);
+            app.log.info({ endpointId, bridgeId: pending.bridgeId, state }, "Originated call after endpoint state change");
+          } catch (error) {
+            // If originate fails, endpoint might not be fully registered yet
+            // Will retry on next state change event (similar to how Linphone SDK retries)
+            app.log.debug({ err: error, endpointId, state }, "Failed to originate on state change, will retry on next event");
+          }
         }
       }
     }
+    return;
   }
 
   if (event.type === "StasisStart" && typeof event.channel === "object" && event.channel) {

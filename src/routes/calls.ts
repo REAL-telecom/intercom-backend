@@ -13,7 +13,7 @@ import {
 } from "../store/redis";
 import { createBridge, addChannelToBridge, originateCall, hangupChannel } from "../ari/client";
 import { createTempSipEndpoint, deleteTempSipEndpoint } from "../store/postgres";
-import { setPendingOriginate, deletePendingOriginate } from "../store/redis";
+import { setPendingOriginate, deletePendingOriginate, getPendingOriginate } from "../store/redis";
 
 type CallPayload = {
   channelId: string;
