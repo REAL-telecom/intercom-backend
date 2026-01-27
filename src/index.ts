@@ -68,7 +68,7 @@ subscribeToEndpointEvents()
 
 connectAriEvents(async (event) => {
   // Log all events for debugging
-пше   app.log.info({ eventType: event.type, fullEvent: JSON.stringify(event, null, 2) }, "ARI event received");
+  app.log.info({ eventType: event.type, fullEvent: JSON.stringify(event, null, 2) }, "ARI event received");
 
   // Handle EndpointStateChange events for temporary endpoints
   // When endpoint state changes, try to originate if there's a pending call
