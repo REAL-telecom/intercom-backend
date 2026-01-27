@@ -179,10 +179,10 @@ export const createTempSipEndpoint = async (params: {
       id, transport, aors, auth, context, templates, disallow, allow,
       direct_media, force_rport, rewrite_contact, rtp_symmetric
     ) VALUES (
-      $1, 'transport-udp', $1, $1, $2, $3, 'all', NULL,
+      $1, 'transport-udp', $1, $1, $2, $3, 'all', 'ulaw,alaw,h264',
       'no', 'yes', 'yes', 'yes'
     )
-    ON CONFLICT (id) DO UPDATE SET context = EXCLUDED.context, templates = EXCLUDED.templates;
+    ON CONFLICT (id) DO UPDATE SET context = EXCLUDED.context, templates = EXCLUDED.templates, allow = EXCLUDED.allow;
     `,
     [id, context, templateId]
   );
