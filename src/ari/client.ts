@@ -48,6 +48,7 @@ export const connectAriEvents = (onEvent: AriEventHandler) => {
 
     ws.on("open", () => {
       attempts = 0;
+      console.log("✅ ARI WebSocket connected successfully");
     });
 
     ws.on("message", (data: RawData) => {
@@ -60,7 +61,7 @@ export const connectAriEvents = (onEvent: AriEventHandler) => {
     });
 
     ws.on("error", (error) => {
-      console.warn("ARI WebSocket error", error);
+      console.error("❌ ARI WebSocket error", error);
     });
 
     ws.on("close", (code, reason) => {
@@ -68,7 +69,7 @@ export const connectAriEvents = (onEvent: AriEventHandler) => {
       const delayMs = Math.min(30000, 1000 * 2 ** Math.min(attempts, 5));
       attempts += 1;
       console.warn(
-        `ARI WebSocket closed (code=${code}${reasonText ? `, reason=${reasonText}` : ""}); retry in ${delayMs}ms`
+        `⚠️ ARI WebSocket closed (code=${code}${reasonText ? `, reason=${reasonText}` : ""}); retry in ${delayMs}ms`
       );
       setTimeout(connect, delayMs);
     });

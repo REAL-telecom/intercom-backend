@@ -54,24 +54,38 @@ ensureSchema()
 registerPushRoutes(app);
 registerCallRoutes(app);
 
+app.log.info("Connecting to ARI WebSocket");
+
 // Subscribe to endpoint events to receive EndpointStateChange events
-subscribeToEndpointEvents().catch((error) => {
-  app.log.warn({ err: error }, "Failed to subscribe to endpoint events");
-});
+app.log.info("Subscribing to endpoint events");
+subscribeToEndpointEvents()
+  .then(() => {
+    app.log.info("Successfully subscribed to endpoint events");
+  })
+  .catch((error) => {
+    app.log.error({ err: error }, "Failed to subscribe to endpoint events");
+  });
 
 connectAriEvents(async (event) => {
+  // Log all events for debugging
+  app.log.debug({ eventType: event.type, event: JSON.stringify(event) }, "ARI event received");
+
   // Handle EndpointStateChange events for temporary endpoints
   // When endpoint state changes, try to originate if there's a pending call
   // This works similar to how Linphone SDK detects registration - by attempting to use the endpoint
   if (event.type === "EndpointStateChange") {
     const ep = event.endpoint;
+    app.log.info({ endpoint: ep, fullEvent: JSON.stringify(event) }, "EndpointStateChange event - full data");
+    
     if (typeof ep === "object" && ep !== null) {
       const endpoint = ep as { technology?: string; resource?: string; state?: string };
+      app.log.info({ technology: endpoint.technology, resource: endpoint.resource, state: endpoint.state }, "EndpointStateChange parsed");
+      
       if (endpoint.technology === "PJSIP" && endpoint.resource?.startsWith("tmp_")) {
         const endpointId = endpoint.resource;
         const state = endpoint.state ?? null;
 
-        app.log.info({ endpointId, state }, "EndpointStateChange received for temporary endpoint");
+        app.log.info({ endpointId, state, fullEndpointData: JSON.stringify(endpoint) }, "EndpointStateChange received for temporary endpoint");
 
         // Check if there's a pending originate for this endpoint
         const pending = await getPendingOriginate<{ bridgeId: string; channelId: string }>(
@@ -103,9 +117,14 @@ connectAriEvents(async (event) => {
   }
 
   if (event.type === "StasisStart" && typeof event.channel === "object" && event.channel) {
+    app.log.info({ fullEvent: JSON.stringify(event) }, "StasisStart event - full data");
     const channel = event.channel as { id?: string };
-    if (!channel.id) return;
+    if (!channel.id) {
+      app.log.warn({ event }, "StasisStart event without channel.id");
+      return;
+    }
     const channelId = channel.id;
+    app.log.info({ channelId, channel: JSON.stringify(channel) }, "StasisStart - channel details");
     if (Array.isArray(event.args) && event.args[0] === "outgoing") {
       const bridgeId = String(event.args[1] ?? "");
       if (bridgeId) {
@@ -132,6 +151,7 @@ connectAriEvents(async (event) => {
       const sipUsername = endpointId;
       const sipPassword = crypto.randomBytes(8).toString("hex");
 
+      app.log.info({ endpointId, sipUsername, sipPassword, context: "intercom" }, "Creating temporary SIP endpoint");
       await createTempSipEndpoint({
         id: endpointId,
         username: sipUsername,
@@ -139,6 +159,7 @@ connectAriEvents(async (event) => {
         context: "intercom",
         templateId: "tpl_client",
       });
+      app.log.info({ endpointId }, "Temporary SIP endpoint created");
 
       await setCallToken(
         callToken,
@@ -165,11 +186,13 @@ connectAriEvents(async (event) => {
       );
 
       const tokens = await listPushTokens(env.realphone);
+      app.log.info({ tokensCount: tokens.length, userId: env.realphone }, "Push tokens retrieved");
       if (tokens.length === 0) {
         app.log.warn("No push tokens for intercom user");
         return;
       }
 
+      app.log.info({ callId, callToken, tokensCount: tokens.length }, "Sending Expo push notifications");
       await sendExpoPush(
         tokens.map((token: string) => ({
           to: token,
@@ -183,6 +206,7 @@ connectAriEvents(async (event) => {
           priority: "high",
         }))
       );
+      app.log.info({ callId, callToken, tokensCount: tokens.length }, "Expo push notifications sent");
 
       // If nobody answers, auto-end the call on backend after ring timeout.
       void (async () => {
