@@ -71,12 +71,15 @@ connectAriEvents(async (event) => {
         const endpointId = endpoint.resource;
         const state = endpoint.state ?? null;
 
+        app.log.info({ endpointId, state }, "EndpointStateChange received for temporary endpoint");
+
         // Check if there's a pending originate for this endpoint
         const pending = await getPendingOriginate<{ bridgeId: string; channelId: string }>(
           endpointId
         );
 
         if (pending) {
+          app.log.info({ endpointId, state, bridgeId: pending.bridgeId }, "Found pending originate, attempting to originate");
           // Try to originate regardless of state
           // If endpoint is registered, originate will succeed
           // If not, it will fail and we'll retry on next state change
@@ -89,8 +92,10 @@ connectAriEvents(async (event) => {
           } catch (error) {
             // If originate fails, endpoint might not be fully registered yet
             // Will retry on next state change event (similar to how Linphone SDK retries)
-            app.log.debug({ err: error, endpointId, state }, "Failed to originate on state change, will retry on next event");
+            app.log.warn({ err: error, endpointId, state }, "Failed to originate on state change, will retry on next event");
           }
+        } else {
+          app.log.debug({ endpointId, state }, "No pending originate found for endpoint");
         }
       }
     }
@@ -264,6 +269,37 @@ const cleanupStaleEndpoints = async () => {
 };
 
 setInterval(cleanupStaleEndpoints, 60000);
+
+/**
+ * Periodically check pending originate requests and try to originate calls.
+ * This is a fallback mechanism in case EndpointStateChange events don't arrive in time.
+ */
+const checkPendingOriginate = async () => {
+  try {
+    const endpointIds = await listTempSipEndpoints();
+    for (const endpointId of endpointIds) {
+      const pending = await getPendingOriginate<{ bridgeId: string; channelId: string }>(
+        endpointId
+      );
+      if (pending) {
+        try {
+          const appArgs = `outgoing,${pending.bridgeId}`;
+          await originateCall(`PJSIP/${endpointId}`, appArgs);
+          await deletePendingOriginate(endpointId);
+          app.log.info({ endpointId, bridgeId: pending.bridgeId }, "Originated call from periodic check");
+        } catch (error) {
+          // Endpoint might not be registered yet, will retry on next check
+          app.log.debug({ err: error, endpointId }, "Failed to originate from periodic check, will retry");
+        }
+      }
+    }
+  } catch (error) {
+    app.log.warn({ err: error }, "Failed to check pending originate");
+  }
+};
+
+// Check every 2 seconds for pending originate requests
+setInterval(checkPendingOriginate, 2000);
 
 app.listen({ port: config.appPort, host: "0.0.0.0" }).catch((err) => {
   app.log.error(err);
