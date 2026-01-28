@@ -188,6 +188,51 @@ else
   warn "Firewall не настроен. Смотри лог: ${LOG_FILE}"
 fi
 
+section "Получение SSL сертификатов Let's Encrypt"
+# Получаем сертификат в standalone режиме
+# При первичном развертывании сервисы еще не установлены, порт 80 свободен
+certbot_output="$(certbot certonly --standalone --non-interactive --agree-tos --email admin@${SERVER_DOMAIN} -d ${SERVER_DOMAIN} 2>&1 || true)"
+echo "${certbot_output}" >> "${LOG_FILE}" 2>&1
+
+if [[ -d "/etc/letsencrypt/live/${SERVER_DOMAIN}" ]] && [[ -f "/etc/letsencrypt/live/${SERVER_DOMAIN}/fullchain.pem" ]] && [[ -f "/etc/letsencrypt/live/${SERVER_DOMAIN}/privkey.pem" ]]; then
+  ok "SSL сертификаты успешно получены для ${SERVER_DOMAIN}"
+else
+  warn "Не удалось получить SSL сертификаты. Смотри лог: ${LOG_FILE}"
+  warn "Вы можете получить сертификаты вручную позже: certbot certonly --standalone -d ${SERVER_DOMAIN}"
+fi
+
+section "Настройка автоматического обновления сертификатов"
+# Создаем директорию для хуков обновления
+mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+
+# Проверяем, что таймер certbot активен
+systemctl enable certbot.timer >> "${LOG_FILE}" 2>&1
+systemctl start certbot.timer >> "${LOG_FILE}" 2>&1
+if systemctl is-active --quiet certbot.timer || systemctl is-enabled --quiet certbot.timer; then
+  ok "Таймер автоматического обновления сертификатов настроен"
+else
+  warn "Таймер certbot не активен. Смотри лог: ${LOG_FILE}"
+fi
+
+# Копируем скрипт для перезагрузки сервисов после обновления сертификатов
+# Certbot автоматически выполняет все исполняемые скрипты из renewal-hooks/deploy/
+# при успешном обновлении сертификатов (не требуется указывать --deploy-hook)
+if [[ -f "${CONFIG_DIR}/tools/reload-services.sh" ]]; then
+  cp "${CONFIG_DIR}/tools/reload-services.sh" /etc/letsencrypt/renewal-hooks/deploy/reload-services.sh
+  chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-services.sh
+  
+  # Тестируем, что certbot видит скрипт (dry-run не выполняет скрипты, но показывает какие будут выполнены)
+  certbot_test_output="$(certbot renew --dry-run 2>&1 || true)"
+  echo "${certbot_test_output}" >> "${LOG_FILE}" 2>&1
+  if echo "${certbot_test_output}" | grep -q "reload-services.sh\|deploy.*hook"; then
+    ok "Скрипт перезагрузки сервисов установлен"
+  else
+    warn "Скрипт перезагрузки сервисов не установлен"
+  fi
+else
+  warn "Скрипт reload-services.sh не найден в репозитории (configs/tools). Смотри лог: ${LOG_FILE}"
+fi
+
 section "Установка Asterisk"
 ASTERISK_MAJOR="22"
 ASTERISK_TARBALL="asterisk-${ASTERISK_MAJOR}-current.tar.gz"

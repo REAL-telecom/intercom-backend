@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import sensible from "@fastify/sensible";
+import fs from "fs";
 import { env } from "./config/env";
 import { ensureSchema, ensureUser, ensurePjsipTemplates } from "./store/postgres";
 import { registerPushRoutes } from "./routes/push";
@@ -42,7 +43,27 @@ const config = {
   baseUrl: env.serverDomain,
 };
 
-const app = Fastify({ logger: true });
+// Проверяем наличие SSL сертификатов
+const certPath = `/etc/letsencrypt/live/${env.serverDomain}/fullchain.pem`;
+const keyPath = `/etc/letsencrypt/live/${env.serverDomain}/privkey.pem`;
+const hasCertificates = fs.existsSync(certPath) && fs.existsSync(keyPath);
+
+let httpsOptions: { cert: Buffer; key: Buffer } | undefined;
+if (hasCertificates) {
+  try {
+    httpsOptions = {
+      cert: fs.readFileSync(certPath),
+      key: fs.readFileSync(keyPath),
+    };
+  } catch (error) {
+    console.warn("Failed to read SSL certificates, falling back to HTTP", error);
+  }
+}
+
+const app = Fastify({
+  logger: true,
+  ...(httpsOptions ? { https: httpsOptions } : {}),
+});
 app.register(sensible);
 
 ensureSchema()
@@ -408,6 +429,9 @@ const checkPendingOriginate = async () => {
 
 // Check every 2 seconds for pending originate requests
 setInterval(checkPendingOriginate, 2000);
+
+const protocol = httpsOptions ? "https" : "http";
+app.log.info({ protocol, port: config.appPort, hasCertificates }, "Starting server");
 
 app.listen({ port: config.appPort, host: "0.0.0.0" }).catch((err) => {
   app.log.error(err);
