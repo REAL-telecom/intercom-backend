@@ -118,11 +118,16 @@ connectAriEvents(async (event) => {
         );
 
         if (pending) {
+          // Only attempt originate if endpoint is online or not offline
+          // Skip if endpoint is offline - it's not registered yet
+          if (state === "offline" || state === "unknown") {
+            app.log.debug({ endpointId, state, bridgeId: pending.bridgeId }, "Skipping originate - endpoint is not online yet");
+            return;
+          }
+
           app.log.info({ endpointId, state, bridgeId: pending.bridgeId }, "Found pending originate, attempting to originate");
-          // Try to originate regardless of state
-          // If endpoint is registered, originate will succeed
-          // If not, it will fail and we'll retry on next state change
-          // This mimics how Linphone SDK works - it knows registration succeeded when it can use the endpoint
+          // Try to originate only if endpoint is online
+          // This prevents multiple failed attempts when endpoint is offline
           try {
             const appArgs = `outgoing,${pending.bridgeId}`;
             await originateCall(`PJSIP/${endpointId}`, appArgs);
@@ -246,6 +251,7 @@ connectAriEvents(async (event) => {
         },
         env.callTokenTtlSec
       );
+      app.log.info({ callToken, channelId, endpointId, ttlSec: env.callTokenTtlSec }, "CallToken created and stored");
       await setEndpointSession(endpointId, { type: "call", token: callToken }, env.callTokenTtlSec);
 
       await setChannelSession(
@@ -282,15 +288,21 @@ connectAriEvents(async (event) => {
         try {
           await new Promise((r) => setTimeout(r, env.ringTimeoutSec * 1000));
           const stillActive = await getCallToken(callToken);
-          if (!stillActive) return;
+          if (!stillActive) {
+            app.log.debug({ callToken, channelId }, "Call already ended, skipping timeout cleanup");
+            return;
+          }
 
-          app.log.warn({ callToken, channelId }, "Incoming call timed out");
+          app.log.warn({ callToken, channelId, ringTimeoutSec: env.ringTimeoutSec, callTokenTtlSec: env.callTokenTtlSec }, "Incoming call timed out - hanging up channel");
           try {
             await hangupChannel(channelId);
+            app.log.info({ callToken, channelId }, "Timed out channel hung up successfully - callToken will remain for cleanup");
           } catch (error) {
             app.log.warn({ err: error, callToken, channelId }, "Failed to hangup timed out channel");
           }
-          // Не удаляем данные - Redis очистит их автоматически по TTL
+          // Не удаляем callToken сразу - даем время клиенту завершить звонок
+          // Redis очистит его автоматически по TTL (который больше ringTimeoutSec)
+          // callTokenTtlSec (300s) > ringTimeoutSec (60s), так что клиент успеет завершить звонок
         } catch (error) {
           app.log.warn({ err: error, callToken }, "Failed to auto-end timed out call");
         }

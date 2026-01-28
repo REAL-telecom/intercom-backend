@@ -49,14 +49,18 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
   const endCallByToken = async (callToken: string) => {
     const payload = await getCallToken<CallPayload>(callToken);
     if (!payload) {
+      // CallToken может быть уже удален (таймаут или завершение)
+      // Это нормально - просто логируем и возвращаем успех
+      app.log.debug({ callToken }, "CallToken not found - call may already be ended");
       throw app.httpErrors.notFound("Invalid callToken");
     }
 
     try {
       await hangupChannel(payload.channelId);
+      app.log.info({ callToken, channelId: payload.channelId }, "Call ended successfully by token");
     } catch (error) {
       // Channel may already be gone; cleanup should still proceed.
-      app.log.warn({ err: error, callToken, channelId: payload.channelId }, "Failed to hangup channel");
+      app.log.warn({ err: error, callToken, channelId: payload.channelId }, "Failed to hangup channel - may already be ended");
     }
     // Не удаляем данные - Redis очистит их автоматически по TTL
   };
