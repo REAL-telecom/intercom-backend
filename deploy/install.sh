@@ -234,7 +234,7 @@ else
 fi
 
 section "Установка Asterisk"
-ASTERISK_MAJOR="22"
+ASTERISK_MAJOR="20"
 ASTERISK_TARBALL="asterisk-${ASTERISK_MAJOR}-current.tar.gz"
 cd /usr/src
 run_with_spinner "Скачивание дистрибутива" "wget -q http://downloads.asterisk.org/pub/telephony/asterisk/${ASTERISK_TARBALL}"
