@@ -208,6 +208,15 @@ export const getChannel = async (channelId: string) => {
 };
 
 /**
+ * Get bridge information including channels.
+ */
+export const getBridge = async (bridgeId: string) => {
+  return request<{ id: string; channels: string[]; bridge_type: string; video_mode?: string }>(
+    `/bridges/${bridgeId}`
+  );
+};
+
+/**
  * Subscribe ARI application to endpoint events.
  * Required to receive EndpointStateChange events.
  * Subscribes to all PJSIP endpoints.

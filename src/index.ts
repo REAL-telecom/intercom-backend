@@ -12,6 +12,7 @@ import {
   hangupChannel,
   subscribeToEndpointEvents,
   originateCall,
+  getBridge,
 } from "./ari/client";
 import {
   listPushTokens,
@@ -160,7 +161,37 @@ connectAriEvents(async (event) => {
           
           // Добавляем канал в bridge
           await addChannelToBridge(bridgeId, channelId);
-          app.log.info({ channelId, bridgeId }, "Outgoing channel successfully added to bridge - call should be connected");
+          app.log.info({ channelId, bridgeId }, "Outgoing channel successfully added to bridge");
+          
+          // Теперь нужно ответить на канал домофона
+          // Получаем информацию о bridge, чтобы найти канал домофона
+          try {
+            // Даем время каналу клиента полностью инициализироваться
+            await new Promise((r) => setTimeout(r, 300));
+            
+            const bridgeInfo = await getBridge(bridgeId);
+            app.log.info({ bridgeId, channels: bridgeInfo.channels, currentChannel: channelId }, "Bridge info retrieved");
+            
+            if (bridgeInfo.channels && bridgeInfo.channels.length > 0) {
+              // Находим канал домофона (не текущий outgoing канал)
+              const domophoneChannelId = bridgeInfo.channels.find((ch: string) => ch !== channelId);
+              if (domophoneChannelId) {
+                app.log.info({ domophoneChannelId, bridgeId, allChannels: bridgeInfo.channels }, "Found domophone channel in bridge, answering it");
+                try {
+                  await answerChannel(domophoneChannelId);
+                  app.log.info({ domophoneChannelId }, "CRITICAL: Answered domophone channel - call should be fully connected now");
+                } catch (answerError) {
+                  app.log.warn({ err: answerError, domophoneChannelId }, "Failed to answer domophone channel, may already be answered");
+                }
+              } else {
+                app.log.warn({ bridgeId, channels: bridgeInfo.channels, currentChannel: channelId }, "Could not find domophone channel in bridge");
+              }
+            } else {
+              app.log.warn({ bridgeId }, "Bridge has no channels yet");
+            }
+          } catch (bridgeError) {
+            app.log.warn({ err: bridgeError, bridgeId }, "Failed to get bridge info to answer domophone channel");
+          }
         } catch (error) {
           app.log.error({ err: error, channelId, bridgeId }, "CRITICAL: Failed to add outgoing channel to bridge - call will not connect");
           // Пытаемся еще раз через небольшую задержку
@@ -179,17 +210,9 @@ connectAriEvents(async (event) => {
     }
 
     try {
-      // Answer the incoming channel to move it from Ring to Up state
-      // This is required for the call to be established properly
-      try {
-        await answerChannel(channelId);
-        app.log.info({ channelId }, "Answered incoming channel");
-        // Даем время каналу перейти в состояние Up
-        await new Promise((r) => setTimeout(r, 100));
-      } catch (error) {
-        app.log.error({ err: error, channelId }, "Failed to answer incoming channel");
-        return; // Не продолжаем, если не удалось ответить
-      }
+      // НЕ отвечаем сразу - ответим после того, как клиентский канал ответит
+      // Это нужно для правильной установки соединения
+      app.log.info({ channelId }, "Incoming domophone channel received, will answer after client connects");
 
       const callId = crypto.randomUUID();
       const callToken = crypto.randomUUID();
