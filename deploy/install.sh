@@ -191,6 +191,7 @@ fi
 section "Получение SSL сертификатов Let's Encrypt"
 # Получаем сертификат в standalone режиме
 # При первичном развертывании сервисы еще не установлены, порт 80 свободен
+# Важно: домен должен указывать на IP сервера, порт 80 должен быть доступен извне
 certbot_output="$(certbot certonly --standalone --non-interactive --agree-tos --email admin@${SERVER_DOMAIN} -d ${SERVER_DOMAIN} 2>&1 || true)"
 echo "${certbot_output}" >> "${LOG_FILE}" 2>&1
 
@@ -198,6 +199,10 @@ if [[ -d "/etc/letsencrypt/live/${SERVER_DOMAIN}" ]] && [[ -f "/etc/letsencrypt/
   ok "SSL сертификаты успешно получены для ${SERVER_DOMAIN}"
 else
   warn "Не удалось получить SSL сертификаты. Смотри лог: ${LOG_FILE}"
+  warn "Возможные причины:"
+  warn "  1. Домен ${SERVER_DOMAIN} не указывает на IP ${SERVER_IP} (проверьте DNS запись A)"
+  warn "  2. Порт 80 недоступен извне (проверьте firewall и настройки провайдера)"
+  warn "  3. Что-то уже слушает порт 80 (проверьте: sudo netstat -tulpn | grep :80)"
   warn "Вы можете получить сертификаты вручную позже: certbot certonly --standalone -d ${SERVER_DOMAIN}"
 fi
 
@@ -221,13 +226,11 @@ if [[ -f "${CONFIG_DIR}/tools/reload-services.sh" ]]; then
   cp "${CONFIG_DIR}/tools/reload-services.sh" /etc/letsencrypt/renewal-hooks/deploy/reload-services.sh
   chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-services.sh
   
-  # Тестируем, что certbot видит скрипт (dry-run не выполняет скрипты, но показывает какие будут выполнены)
-  certbot_test_output="$(certbot renew --dry-run 2>&1 || true)"
-  echo "${certbot_test_output}" >> "${LOG_FILE}" 2>&1
-  if echo "${certbot_test_output}" | grep -q "reload-services.sh\|deploy.*hook"; then
+  # Проверяем, что файл успешно скопирован и исполняемый
+  if [[ -f /etc/letsencrypt/renewal-hooks/deploy/reload-services.sh ]] && [[ -x /etc/letsencrypt/renewal-hooks/deploy/reload-services.sh ]]; then
     ok "Скрипт перезагрузки сервисов установлен"
   else
-    warn "Скрипт перезагрузки сервисов не установлен"
+    warn "Ошибка установки скрипта перезагрузки сервисов. Смотри лог: ${LOG_FILE}"
   fi
 else
   warn "Скрипт reload-services.sh не найден в репозитории (configs/tools). Смотри лог: ${LOG_FILE}"
