@@ -27,14 +27,6 @@ export const getCallToken = async <T>(callToken: string) => {
 };
 
 /**
- * Remove callToken payload after call ends.
- */
-export const deleteCallToken = async (callToken: string) => {
-  const key = `call:${callToken}`;
-  await redis.del(key);
-};
-
-/**
  * Store temporary endpoint session mapping with TTL.
  */
 export const setEndpointSession = async (
@@ -53,43 +45,6 @@ export const getEndpointSession = async <T>(endpointId: string) => {
   const key = `endpoint:${endpointId}`;
   const value = await redis.get(key);
   return value ? (JSON.parse(value) as T) : null;
-};
-
-/**
- * Remove endpoint session mapping.
- */
-export const deleteEndpointSession = async (endpointId: string) => {
-  const key = `endpoint:${endpointId}`;
-  await redis.del(key);
-};
-
-/**
- * Store outgoing session token with TTL.
- */
-export const setOutgoingToken = async (
-  outgoingToken: string,
-  payload: object,
-  ttlSec: number
-) => {
-  const key = `outgoing:${outgoingToken}`;
-  await redis.set(key, JSON.stringify(payload), "EX", ttlSec);
-};
-
-/**
- * Load outgoing session token payload.
- */
-export const getOutgoingToken = async <T>(outgoingToken: string) => {
-  const key = `outgoing:${outgoingToken}`;
-  const value = await redis.get(key);
-  return value ? (JSON.parse(value) as T) : null;
-};
-
-/**
- * Remove outgoing session token after cleanup.
- */
-export const deleteOutgoingToken = async (outgoingToken: string) => {
-  const key = `outgoing:${outgoingToken}`;
-  await redis.del(key);
 };
 
 /**
@@ -112,14 +67,6 @@ export const getChannelSession = async <T>(channelId: string) => {
   const key = `channel:${channelId}`;
   const value = await redis.get(key);
   return value ? (JSON.parse(value) as T) : null;
-};
-
-/**
- * Remove channel session after call end.
- */
-export const deleteChannelSession = async (channelId: string) => {
-  const key = `channel:${channelId}`;
-  await redis.del(key);
 };
 
 /**

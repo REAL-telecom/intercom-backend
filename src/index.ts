@@ -9,6 +9,7 @@ import {
   connectAriEvents,
   answerChannel,
   holdChannel,
+  createBridge,
   addChannelToBridge,
   hangupChannel,
   subscribeToEndpointEvents,
@@ -24,14 +25,11 @@ import {
 import {
   setCallToken,
   setChannelSession,
-  deleteCallToken,
   getChannelSession,
-  deleteChannelSession,
   setEndpointSession,
   getEndpointSession,
-  deleteEndpointSession,
   getCallToken,
-  getOutgoingToken,
+  setPendingOriginate,
   getPendingOriginate,
   deletePendingOriginate,
 } from "./store/redis";
@@ -281,6 +279,20 @@ connectAriEvents(async (event) => {
         env.callTokenTtlSec
       );
 
+      // Bridge and originate: same logic as previously in GET /calls/credentials
+      try {
+        app.log.info({ callToken, channelId, endpointId }, "STEP 1: Creating bridge and setting up originate");
+        const bridge = await createBridge();
+        app.log.info({ bridgeId: bridge.id, channelId }, "STEP 2: Bridge created, adding incoming domophone channel");
+        await new Promise((r) => setTimeout(r, 300));
+        await addChannelToBridge(bridge.id, channelId);
+        app.log.info({ bridgeId: bridge.id, channelId }, "STEP 3: Incoming domophone channel added to bridge");
+        await setPendingOriginate(endpointId, { bridgeId: bridge.id, channelId }, env.ringTimeoutSec);
+        app.log.info({ endpointId, bridgeId: bridge.id }, "STEP 4: Pending originate stored, waiting for endpoint registration.");
+      } catch (error) {
+        app.log.error({ err: error, callToken, channelId, endpointId }, "CRITICAL: Failed to setup bridge/originate - call will not connect");
+      }
+
       const tokens = await listPushTokens(env.realphone);
       app.log.info({ tokensCount: tokens.length, userId: env.realphone }, "Push tokens retrieved");
       if (tokens.length === 0) {
@@ -288,13 +300,14 @@ connectAriEvents(async (event) => {
         return;
       }
 
-      app.log.info({ callId, callToken, tokensCount: tokens.length }, "Sending Expo push notifications");
+      const sipCredentials = { username: sipUsername, password: sipPassword, domain: env.serverDomain, port: 5060 };
+      app.log.info({ callId, tokensCount: tokens.length }, "Sending Expo push notifications");
       await sendExpoPush(
         tokens.map((token: string) => ({
           to: token,
           title: "Звонок в домофон",
           body: "Кто-то стоит у двери",
-          data: { type: "SIP_CALL", callId, callToken },
+          data: { type: "SIP_CALL", callId, sipCredentials },
           // iOS: play bundled custom sound; Android: sound is controlled by notification channel.
           sound: "ringtone.wav",
           channelId: "calls",
@@ -302,7 +315,7 @@ connectAriEvents(async (event) => {
           priority: "high",
         }))
       );
-      app.log.info({ callId, callToken, tokensCount: tokens.length }, "Expo push notifications sent");
+      app.log.info({ callId, tokensCount: tokens.length }, "Expo push notifications sent");
 
       // If nobody answers, auto-end the call on backend after ring timeout.
       void (async () => {
@@ -367,28 +380,14 @@ const cleanupStaleEndpoints = async () => {
         continue;
       }
 
-      // Проверяем, истек ли токен в Redis
-      if (session.type === "call") {
-        const token = await getCallToken(session.token);
-        if (!token) {
-          // Токен истек в Redis - удаляем из PostgreSQL
-          try {
-            await deleteTempSipEndpoint(endpointId);
-            app.log.debug({ endpointId }, "Cleaned up endpoint after call token expired");
-          } catch (error) {
-            app.log.warn({ err: error, endpointId }, "Failed to delete endpoint from PostgreSQL");
-          }
-        }
-      } else {
-        const token = await getOutgoingToken(session.token);
-        if (!token) {
-          // Токен истек в Redis - удаляем из PostgreSQL
-          try {
-            await deleteTempSipEndpoint(endpointId);
-            app.log.debug({ endpointId }, "Cleaned up endpoint after outgoing token expired");
-          } catch (error) {
-            app.log.warn({ err: error, endpointId }, "Failed to delete endpoint from PostgreSQL");
-          }
+      // Проверяем, истек ли токен в Redis (call и outgoing используют callToken)
+      const token = await getCallToken(session.token);
+      if (!token) {
+        try {
+          await deleteTempSipEndpoint(endpointId);
+          app.log.debug({ endpointId }, "Cleaned up endpoint after call token expired");
+        } catch (error) {
+          app.log.warn({ err: error, endpointId }, "Failed to delete endpoint from PostgreSQL");
         }
       }
     }
