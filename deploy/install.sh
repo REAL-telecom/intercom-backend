@@ -455,15 +455,16 @@ node_version_clean="$(extract_version "${node_version}")"
 check_output_installed "Node.js" "${node_version_clean}"
 fi
 
-if ! skip_if_done "npm" command -v npm >/dev/null 2>&1; then
+# npm ставится вместе с Node.js, но версия обновляется отдельно — шаг не пропускаем, всегда обновляем.
 section "Обновление npm"
 run_with_spinner "Обновление npm" "npm install -g npm@latest"
 npm_version="$(npm -v 2>/dev/null || true)"
 npm_version_clean="$(extract_version "${npm_version}")"
 check_output_installed "npm" "${npm_version_clean}"
-fi
 
+BACKEND_DEPLOYED=0
 if ! skip_if_done "бэкенд (intercom-backend)" systemctl is-active --quiet intercom-backend 2>/dev/null && test -f /opt/intercom-backend/dist/index.js 2>/dev/null; then
+BACKEND_DEPLOYED=1
 section "Установка и запуск сервера"
 mkdir -p /opt/intercom-backend
 rsync -a --delete --exclude 'install.log' "${ROOT_DIR}/" /opt/intercom-backend/
@@ -483,6 +484,7 @@ else
 fi
 fi
 
+if [[ "${BACKEND_DEPLOYED}" -eq 1 ]]; then
 echo "Проверка доступности сервера"
 sleep 2
 health_output=""
@@ -497,6 +499,7 @@ if [[ -n "${health_output}" ]]; then
   ok "Сервер доступен"
 else
   warn "Сервер недоступен. Смотри лог: ${LOG_FILE}"
+fi
 fi
 
 section "Завершение установки"
