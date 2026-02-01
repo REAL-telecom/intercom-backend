@@ -369,7 +369,8 @@ else
 fi
 fi
 
-if ! skip_if_done "Docker и Docker Compose" command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+# Пропуск только если установлен Docker из пакетов (есть systemd-unit), а не из snap и т.п.
+if ! skip_if_done "Docker и Docker Compose" sh -c 'command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && ( test -f /lib/systemd/system/docker.service || test -f /usr/lib/systemd/system/docker.service )'; then
 section "Установка Docker"
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -401,6 +402,7 @@ else
   err "${login_output}"
 fi
 
+if ! skip_if_done "Redis и Postgres (Docker Compose)" sh -c "cd \"${ROOT_DIR}\" && docker compose ps --services --filter status=running 2>/dev/null | grep -q '^redis$' && docker compose ps --services --filter status=running 2>/dev/null | grep -q '^postgres$'"; then
 section "Запуск Redis и Postgres через Docker Compose"
 cd "${ROOT_DIR}"
 run_with_spinner "docker compose up" "docker compose up -d"
@@ -411,7 +413,9 @@ if docker compose ps --services --filter status=running | grep -q '^redis$' \
 else
   warn "Redis и Postgres не запущены. Смотри лог: ${LOG_FILE}"
 fi
+fi
 
+if ! skip_if_done "сервис Asterisk" systemctl is-active --quiet asterisk 2>/dev/null; then
 section "Установка сервиса Asterisk"
 cp "${CONFIG_DIR}/asterisk/asterisk.service" /etc/systemd/system/asterisk.service
 systemctl daemon-reload
@@ -423,7 +427,9 @@ if [[ -s /etc/systemd/system/asterisk.service ]] \
 else
   warn "Asterisk не запущен. Смотри лог: ${LOG_FILE}"
 fi
+fi
 
+if ! skip_if_done "fail2ban" test -s /etc/fail2ban/jail.local 2>/dev/null && systemctl is-active --quiet fail2ban 2>/dev/null; then
 section "Настройка fail2ban"
 mkdir -p /etc/fail2ban/filter.d
 cp "${CONFIG_DIR}/fail2ban/jail.local" /etc/fail2ban/jail.local
@@ -438,20 +444,26 @@ else
   warn "fail2ban не настроен. Смотри лог: ${LOG_FILE}"
 fi
 fail2ban-client status >> "${LOG_FILE}" 2>&1 || true
+fi
 
+if ! skip_if_done "Node.js" command -v node >/dev/null 2>&1; then
 section "Установка Node.js (LTS 24.x)"
 run_with_spinner "Скачивание дистрибутива" "curl -fsSL https://deb.nodesource.com/setup_24.x | bash -"
 run_with_spinner "Установка" "apt-get install -y nodejs"
 node_version="$(node -v 2>/dev/null || true)"
 node_version_clean="$(extract_version "${node_version}")"
 check_output_installed "Node.js" "${node_version_clean}"
+fi
 
+if ! skip_if_done "npm" command -v npm >/dev/null 2>&1; then
 section "Обновление npm"
 run_with_spinner "Обновление npm" "npm install -g npm@latest"
 npm_version="$(npm -v 2>/dev/null || true)"
 npm_version_clean="$(extract_version "${npm_version}")"
 check_output_installed "npm" "${npm_version_clean}"
+fi
 
+if ! skip_if_done "бэкенд (intercom-backend)" systemctl is-active --quiet intercom-backend 2>/dev/null && test -f /opt/intercom-backend/dist/index.js 2>/dev/null; then
 section "Установка и запуск сервера"
 mkdir -p /opt/intercom-backend
 rsync -a --delete --exclude 'install.log' "${ROOT_DIR}/" /opt/intercom-backend/
@@ -468,6 +480,7 @@ if systemctl is-active --quiet intercom-backend; then
   ok "Сервис запущен"
 else
   warn "Сервис не запущен. Смотри лог: ${LOG_FILE}"
+fi
 fi
 
 echo "Проверка доступности сервера"
