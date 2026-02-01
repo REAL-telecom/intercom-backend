@@ -8,7 +8,6 @@ import { registerCallRoutes } from "./routes/calls";
 import {
   connectAriEvents,
   answerChannel,
-  holdChannel,
   createBridge,
   addChannelToBridge,
   hangupChannel,
@@ -301,21 +300,18 @@ connectAriEvents(async (event) => {
       }
 
       const sipCredentials = { username: sipUsername, password: sipPassword, domain: env.serverDomain, port: 5060 };
-      app.log.info({ callId, tokensCount: tokens.length }, "Sending Expo push notifications");
+      app.log.info({ callId, tokensCount: tokens.length }, "Sending Expo push (call, data-only)");
       await sendExpoPush(
         tokens.map((token: string) => ({
           to: token,
-          title: "Звонок в домофон",
-          body: "Кто-то стоит у двери",
-          data: { type: "SIP_CALL", callId, sipCredentials },
-          // iOS: play bundled custom sound; Android: sound is controlled by notification channel.
-          sound: "ringtone.wav",
-          channelId: "calls",
-          categoryId: "CALL",
-          priority: "high",
+          data: {
+            type: "SIP_CALL",
+            callId,
+            sipCredentials: JSON.stringify(sipCredentials),
+          },
         }))
       );
-      app.log.info({ callId, tokensCount: tokens.length }, "Expo push notifications sent");
+      app.log.info({ callId, tokensCount: tokens.length }, "Expo push (call) sent");
 
       // If nobody answers, auto-end the call on backend after ring timeout.
       void (async () => {
