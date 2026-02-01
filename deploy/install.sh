@@ -455,51 +455,58 @@ node_version_clean="$(extract_version "${node_version}")"
 check_output_installed "Node.js" "${node_version_clean}"
 fi
 
-# npm ставится вместе с Node.js, но версия обновляется отдельно — шаг не пропускаем, всегда обновляем.
 section "Обновление npm"
 run_with_spinner "Обновление npm" "npm install -g npm@latest"
 npm_version="$(npm -v 2>/dev/null || true)"
 npm_version_clean="$(extract_version "${npm_version}")"
 check_output_installed "npm" "${npm_version_clean}"
 
-BACKEND_DEPLOYED=0
-if ! skip_if_done "бэкенд (intercom-backend)" systemctl is-active --quiet intercom-backend 2>/dev/null && test -f /opt/intercom-backend/dist/index.js 2>/dev/null; then
-BACKEND_DEPLOYED=1
-section "Установка и запуск сервера"
-mkdir -p /opt/intercom-backend
-rsync -a --delete --exclude 'install.log' "${ROOT_DIR}/" /opt/intercom-backend/
-
-cd /opt/intercom-backend
-run_with_spinner "Скачивание и установка зависимостей" "npm install"
-run_with_spinner "Сборка" "npm run build"
-
-cp /opt/intercom-backend/configs/backend/intercom-backend.service /etc/systemd/system/intercom-backend.service
-systemctl daemon-reload
-systemctl enable intercom-backend >> "${LOG_FILE}" 2>&1
-systemctl start intercom-backend >> "${LOG_FILE}" 2>&1
-if systemctl is-active --quiet intercom-backend; then
-  ok "Сервис запущен"
-else
-  warn "Сервис не запущен. Смотри лог: ${LOG_FILE}"
-fi
+# Установка сервера — пропуск по наличию файлов
+if ! skip_if_done "установка intercom-backend" test -f /opt/intercom-backend/package.json; then
+  section "Установка сервера"
+  mkdir -p /opt/intercom-backend
+  rsync -a --delete --exclude 'install.log' "${ROOT_DIR}/" /opt/intercom-backend/
+  cd /opt/intercom-backend
+  run_with_spinner "Скачивание и установка зависимостей" "npm install"
+  run_with_spinner "Сборка" "npm run build"
+  cp /opt/intercom-backend/configs/backend/intercom-backend.service /etc/systemd/system/intercom-backend.service
+  systemctl daemon-reload
+  systemctl enable intercom-backend >> "${LOG_FILE}" 2>&1
+  ok "Сервер установлен"
 fi
 
-if [[ "${BACKEND_DEPLOYED}" -eq 1 ]]; then
-echo "Проверка доступности сервера"
-sleep 2
-health_output=""
-for _ in {1..10}; do
-  health_output="$(curl -fsS "http://127.0.0.1:${APP_PORT:-3000}/health" 2>/dev/null || true)"
-  if [[ -n "${health_output}" ]]; then
-    break
+# Запуск сервера — пропуск если уже запущен
+BACKEND_RUNNING=0
+if ! skip_if_done "запуск intercom-backend" systemctl is-active --quiet intercom-backend 2>/dev/null; then
+  section "Запуск сервера"
+  run_with_spinner "Запуск сервера" "systemctl start intercom-backend"
+  if systemctl is-active --quiet intercom-backend; then
+    ok "Сервис запущен"
+    BACKEND_RUNNING=1
+  else
+    warn "Сервис не запущен. Смотри лог: ${LOG_FILE}"
   fi
-  sleep 1
-done
-if [[ -n "${health_output}" ]]; then
-  ok "Сервер доступен"
 else
-  warn "Сервер недоступен. Смотри лог: ${LOG_FILE}"
+  BACKEND_RUNNING=1
 fi
+
+# Проверка доступности только если сервис запущен
+if [[ "${BACKEND_RUNNING}" -eq 1 ]]; then
+  section "Проверка доступности сервера"
+  sleep 2
+  health_output=""
+  for _ in {1..10}; do
+    health_output="$(curl -fsS "http://127.0.0.1:${APP_PORT:-3000}/health" 2>/dev/null || true)"
+    if [[ -n "${health_output}" ]]; then
+      break
+    fi
+    sleep 1
+  done
+  if [[ -n "${health_output}" ]]; then
+    ok "Сервер доступен"
+  else
+    warn "Сервер недоступен. Смотри лог: ${LOG_FILE}"
+  fi
 fi
 
 section "Завершение установки"
