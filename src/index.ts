@@ -304,6 +304,7 @@ connectAriEvents(async (event) => {
       await sendExpoPush(
         tokens.map((token: string) => ({
           to: token,
+          priority: "high",
           data: {
             type: "SIP_CALL",
             callId,
