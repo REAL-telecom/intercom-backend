@@ -85,7 +85,7 @@ export const ensureSchema = async () => {
     CREATE TABLE IF NOT EXISTS push_tokens (
       id SERIAL PRIMARY KEY,
       user_id TEXT REFERENCES users(id),
-      expo_push_token TEXT NOT NULL,
+      push_token TEXT NOT NULL,
       platform TEXT NOT NULL,
       device_id TEXT,
       created_at TIMESTAMP DEFAULT NOW(),
@@ -94,28 +94,28 @@ export const ensureSchema = async () => {
   `);
   await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS push_tokens_unique
-    ON push_tokens (user_id, expo_push_token);
+    ON push_tokens (user_id, push_token);
   `);
 };
 
 /**
- * Save (or update) Expo push token for a user.
+ * Save (or update) push token (FCM) for a user.
  */
 export const savePushToken = async (params: {
   userId: string;
-  expoPushToken: string;
+  pushToken: string;
   platform: string;
   deviceId?: string;
 }) => {
-  const { userId, expoPushToken, platform, deviceId } = params;
+  const { userId, pushToken, platform, deviceId } = params;
   await pool.query(
     `
-    INSERT INTO push_tokens (user_id, expo_push_token, platform, device_id)
+    INSERT INTO push_tokens (user_id, push_token, platform, device_id)
     VALUES ($1, $2, $3, $4)
-    ON CONFLICT (user_id, expo_push_token)
+    ON CONFLICT (user_id, push_token)
     DO UPDATE SET platform = EXCLUDED.platform, device_id = EXCLUDED.device_id, updated_at = NOW();
     `,
-    [userId, expoPushToken, platform, deviceId ?? null]
+    [userId, pushToken, platform, deviceId ?? null]
   );
 };
 
@@ -135,14 +135,14 @@ export const ensureUser = async (userId: string) => {
 };
 
 /**
- * Load all Expo tokens for a user.
+ * Load all push tokens for a user.
  */
 export const listPushTokens = async (userId: string) => {
   const result = await pool.query(
-    `SELECT expo_push_token FROM push_tokens WHERE user_id = $1`,
+    `SELECT push_token FROM push_tokens WHERE user_id = $1`,
     [userId]
   );
-  return result.rows.map((row: { expo_push_token: string }) => row.expo_push_token);
+  return result.rows.map((row: { push_token: string }) => row.push_token);
 };
 
 /**

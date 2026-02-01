@@ -103,8 +103,25 @@ run_with_spinner() {
   return ${status}
 }
 
+# Идемпотентность: пропуск шага, если уже выполнено (для продолжения с места остановки)
+skip_if_done() {
+  local msg="$1"
+  shift
+  if "$@"; then
+    ok "Пропуск (уже выполнено): ${msg}"
+    return 0
+  fi
+  return 1
+}
+
 if [[ ! -f "${ENV_FILE}" ]]; then
   err "Файл .env не найден. Скопируйте env.example -> .env и заполните его."
+  exit 1
+fi
+
+FIREBASE_JSON_FILE=$(ls "${ROOT_DIR}"/*-firebase-adminsdk-*.json 2>/dev/null | head -n1)
+if [[ ! -f "${FIREBASE_JSON_FILE}" ]]; then
+  err "Файл ключа Firebase (*-firebase-adminsdk-*.json) не найден. Скопируйте JSON в корень репозитория."
   exit 1
 fi
 
@@ -140,6 +157,7 @@ require_var DOCKER_USER
 require_var DOCKER_PASSWORD
 ok "Переменные окружения найдены"
 
+if ! skip_if_done "системные пакеты (certbot, coturn, fail2ban, ufw)" command -v certbot >/dev/null 2>&1 && command -v ufw >/dev/null 2>&1 && command -v turnserver >/dev/null 2>&1 && command -v fail2ban-client >/dev/null 2>&1; then
 section "Обновление ОС и установка системных зависимостей"
 run_with_spinner "Поиск и установка обновлений" "apt-get update -y"
 run_with_spinner "Установка certbot" "apt-get install -y certbot"
@@ -165,7 +183,9 @@ if echo "${policy_output}" | awk '
 else
   warn "Ошибка установки или обновления системных пакетов. Смотри лог: ${LOG_FILE}"
 fi
+fi
 
+if ! skip_if_done "firewall (ufw)" sh -c 'ufw status 2>/dev/null | grep -q "Status: active"'; then
 section "Настройка firewall (ufw)"
 ufw allow ssh >> "${LOG_FILE}" 2>&1
 ufw allow 80/tcp >> "${LOG_FILE}" 2>&1
@@ -187,25 +207,20 @@ if echo "${ufw_enable_output}" | grep -q "Firewall is active and enabled on syst
 else
   warn "Firewall не настроен. Смотри лог: ${LOG_FILE}"
 fi
+fi
 
+if ! skip_if_done "SSL сертификаты для ${SERVER_DOMAIN}" test -f "/etc/letsencrypt/live/${SERVER_DOMAIN}/fullchain.pem" -a -f "/etc/letsencrypt/live/${SERVER_DOMAIN}/privkey.pem"; then
 section "Получение SSL сертификатов Let's Encrypt"
-# Получаем сертификат в standalone режиме
-# При первичном развертывании сервисы еще не установлены, порт 80 свободен
-# Важно: домен должен указывать на IP сервера, порт 80 должен быть доступен извне
-certbot_output="$(certbot certonly --standalone --non-interactive --agree-tos --email admin@${SERVER_DOMAIN} -d ${SERVER_DOMAIN} 2>&1 || true)"
-echo "${certbot_output}" >> "${LOG_FILE}" 2>&1
+run_with_spinner "Получение сертификата для ${SERVER_DOMAIN}" "sleep 5 && certbot certonly --standalone --non-interactive --agree-tos --email admin@${SERVER_DOMAIN} -d ${SERVER_DOMAIN}"
 
 if [[ -d "/etc/letsencrypt/live/${SERVER_DOMAIN}" ]] && [[ -f "/etc/letsencrypt/live/${SERVER_DOMAIN}/fullchain.pem" ]] && [[ -f "/etc/letsencrypt/live/${SERVER_DOMAIN}/privkey.pem" ]]; then
   ok "SSL сертификаты успешно получены для ${SERVER_DOMAIN}"
 else
   warn "Не удалось получить SSL сертификаты. Смотри лог: ${LOG_FILE}"
-  warn "Возможные причины:"
-  warn "  1. Домен ${SERVER_DOMAIN} не указывает на IP ${SERVER_IP} (проверьте DNS запись A)"
-  warn "  2. Порт 80 недоступен извне (проверьте firewall и настройки провайдера)"
-  warn "  3. Что-то уже слушает порт 80 (проверьте: sudo netstat -tulpn | grep :80)"
-  warn "Вы можете получить сертификаты вручную позже: certbot certonly --standalone -d ${SERVER_DOMAIN}"
+fi
 fi
 
+if ! skip_if_done "таймер certbot и скрипт перезагрузки" systemctl is-enabled --quiet certbot.timer 2>/dev/null && test -x /etc/letsencrypt/renewal-hooks/deploy/reload-services.sh 2>/dev/null; then
 section "Настройка автоматического обновления сертификатов"
 # Создаем директорию для хуков обновления
 mkdir -p /etc/letsencrypt/renewal-hooks/deploy
@@ -235,10 +250,12 @@ if [[ -f "${CONFIG_DIR}/tools/reload-services.sh" ]]; then
 else
   warn "Скрипт reload-services.sh не найден в репозитории (configs/tools). Смотри лог: ${LOG_FILE}"
 fi
+fi
 
-section "Установка Asterisk"
 ASTERISK_MAJOR="22"
 ASTERISK_TARBALL="asterisk-${ASTERISK_MAJOR}-current.tar.gz"
+if ! skip_if_done "Asterisk (сборка из исходников)" test -x /usr/sbin/asterisk; then
+section "Установка Asterisk"
 cd /usr/src
 run_with_spinner "Скачивание дистрибутива" "wget -q http://downloads.asterisk.org/pub/telephony/asterisk/${ASTERISK_TARBALL}"
 run_with_spinner "Распаковка дистрибутива" "tar xvf ${ASTERISK_TARBALL}"
@@ -250,7 +267,9 @@ run_with_spinner "Сборка и установка программы" "make -
 asterisk_version="$(/usr/sbin/asterisk -V 2>/dev/null || true)"
 asterisk_version_clean="$(extract_version "${asterisk_version}")"
 check_output_installed "Asterisk" "${asterisk_version_clean}"
+fi
 
+if ! skip_if_done "пользователь asterisk" id asterisk >/dev/null 2>&1; then
 section "Создание пользователя asterisk"
 if ! id asterisk >/dev/null 2>&1; then
   groupadd asterisk
@@ -268,6 +287,7 @@ if [[ -n "${user_info}" ]] && echo "${dirs_info}" | grep -q 'asterisk'; then
   ok "Пользователь создан и права настроены"
 else
   warn "Ошибка создания пользователя и настройки прав. Смотри лог: ${LOG_FILE}"
+fi
 fi
 
 section "Копирование файлов конфигураций Asterisk"
@@ -298,6 +318,7 @@ else
   warn "Ошибка копирования файлов конфигурации Asterisk. Смотри лог: ${LOG_FILE}"
 fi
 
+if ! skip_if_done "утилиты Asterisk-логов" test -x /usr/local/bin/asterisk-full-logs-on 2>/dev/null; then
 section "Утилиты управления Asterisk-логами"
 mkdir -p /usr/local/bin
 if [[ -f "${CONFIG_DIR}/tools/asterisk-full-logs-on" ]] && [[ -f "${CONFIG_DIR}/tools/asterisk-full-logs-off" ]]; then
@@ -308,7 +329,9 @@ if [[ -f "${CONFIG_DIR}/tools/asterisk-full-logs-on" ]] && [[ -f "${CONFIG_DIR}/
 else
   warn "Утилиты логов не найдены в репозитории (configs/tools). Смотри лог: ${LOG_FILE}"
 fi
+fi
 
+if ! skip_if_done "Logrotate для Asterisk" test -s /etc/logrotate.d/asterisk 2>/dev/null; then
 section "Настройка Logrotate для Asterisk"
 mkdir -p /etc/logrotate.d
 cp "${CONFIG_DIR}/logrotate/asterisk" /etc/logrotate.d/asterisk
@@ -321,7 +344,9 @@ if [[ -s /etc/logrotate.d/asterisk ]] \
 else
   warn "Ошибка настройки Logrotate для Asterisk. Смотри лог: ${LOG_FILE}"
 fi
+fi
 
+if ! skip_if_done "Coturn" test -s /etc/turnserver.conf 2>/dev/null && ! grep -q '__SERVER_IP__' /etc/turnserver.conf 2>/dev/null && systemctl is-active --quiet coturn 2>/dev/null; then
 section "Настройка Coturn"
 cp "${CONFIG_DIR}/coturn/turnserver.conf" /etc/turnserver.conf
 sed -i "s/__SERVER_IP__/${SERVER_IP}/g" /etc/turnserver.conf
@@ -342,7 +367,9 @@ if [[ -s /etc/turnserver.conf ]] \
 else
   warn "Coturn не настроен. Смотри лог: ${LOG_FILE}"
 fi
+fi
 
+if ! skip_if_done "Docker и Docker Compose" command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
 section "Установка Docker"
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -356,11 +383,14 @@ docker_version_clean="$(extract_version "${docker_version}")"
 compose_version_clean="$(extract_version "${compose_version}")"
 check_output_installed "Docker" "${docker_version_clean}"
 check_output_installed "Docker Compose" "${compose_version_clean}"
+fi
 
+if ! skip_if_done "запуск Docker" systemctl is-active --quiet docker 2>/dev/null; then
 section "Запуск Docker"
 systemctl enable docker >> "${LOG_FILE}" 2>&1
 systemctl start docker >> "${LOG_FILE}" 2>&1
 check_service "docker"
+fi
 
 section "Авторизация в Docker Hub"
 login_output="$(echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USER}" --password-stdin 2>&1)"

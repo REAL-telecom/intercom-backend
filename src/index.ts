@@ -24,7 +24,6 @@ import {
 import {
   setCallToken,
   setChannelSession,
-  getChannelSession,
   setEndpointSession,
   getEndpointSession,
   getCallToken,
@@ -32,7 +31,7 @@ import {
   getPendingOriginate,
   deletePendingOriginate,
 } from "./store/redis";
-import { sendExpoPush } from "./push/expo";
+import { sendFcmPush } from "./push/fcm";
 import crypto from "crypto";
 
 const config = {
@@ -300,19 +299,13 @@ connectAriEvents(async (event) => {
       }
 
       const sipCredentials = { username: sipUsername, password: sipPassword, domain: env.serverDomain, port: 5060 };
-      app.log.info({ callId, tokensCount: tokens.length }, "Sending Expo push (call, data-only)");
-      await sendExpoPush(
-        tokens.map((token: string) => ({
-          to: token,
-          priority: "high",
-          data: {
-            type: "SIP_CALL",
-            callId,
-            sipCredentials: JSON.stringify(sipCredentials),
-          },
-        }))
-      );
-      app.log.info({ callId, tokensCount: tokens.length }, "Expo push (call) sent");
+      app.log.info({ callId, tokensCount: tokens.length }, "Sending FCM push (call, data-only)");
+      await sendFcmPush(tokens, {
+        type: "SIP_CALL",
+        callId,
+        sipCredentials: JSON.stringify(sipCredentials),
+      });
+      app.log.info({ callId, tokensCount: tokens.length }, "FCM push (call) sent");
 
       // If nobody answers, auto-end the call on backend after ring timeout.
       void (async () => {

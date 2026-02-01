@@ -32,5 +32,5 @@ export const env = {
     password: requireEnv("POSTGRES_PASSWORD"),
   },
   realphone: requireEnv("REALPHONE"),
-  expoAccessToken: process.env.EXPO_ACCESS_TOKEN || "",
+  firebaseServiceAccountPath: process.env.FIREBASE_SERVICE_ACCOUNT_PATH || "",
 };

@@ -3,25 +3,25 @@ import { savePushToken } from "../store/postgres";
 
 type RegisterBody = {
   userId: string;
-  expoPushToken: string;
+  pushToken: string;
   platform: string;
   deviceId?: string;
 };
 
 /**
  * Push registration endpoint.
- * Stores Expo push token for a user.
+ * Stores FCM (or other) push token for a user.
  */
 export const registerPushRoutes = async (app: FastifyInstance) => {
   app.post<{ Body: RegisterBody }>("/push/register", async (request) => {
-    const { userId, expoPushToken, platform, deviceId } = request.body;
-    if (!userId || !expoPushToken || !platform) {
+    const { userId, pushToken, platform, deviceId } = request.body;
+    if (!userId || !pushToken || !platform) {
       return app.httpErrors.badRequest("Missing required fields");
     }
 
     const payload = deviceId
-      ? { userId, expoPushToken, platform, deviceId }
-      : { userId, expoPushToken, platform };
+      ? { userId, pushToken, platform, deviceId }
+      : { userId, pushToken, platform };
     await savePushToken(payload);
     return { ok: true };
   });
