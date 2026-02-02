@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ASTERISK_MAJOR="22"
-ASTERISK_TARBALL="asterisk-${ASTERISK_MAJOR}-current.tar.gz"
-CONFIG_DIR="${ROOT_DIR}/configs"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ROOT_DIR}/.env"
-FIREBASE_JSON_FILE=$(ls "${ROOT_DIR}"/*-firebase-adminsdk-*.json 2>/dev/null | head -n1) || true
+CONFIG_DIR="${ROOT_DIR}/configs"
 LOG_DIR="/opt/intercom-backend"
 LOG_FILE="${LOG_DIR}/install.log"
+FIREBASE_JSON_FILE=$(ls "${ROOT_DIR}"/*-firebase-adminsdk-*.json 2>/dev/null | head -n1) || true
+ASTERISK_MAJOR="22"
+ASTERISK_TARBALL="asterisk-${ASTERISK_MAJOR}-current.tar.gz"
 NPM_VERSION="11.8.0"
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ -t 1 ]]; then
   COLOR_BLUE="\033[34m"
