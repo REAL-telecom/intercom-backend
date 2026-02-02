@@ -281,9 +281,11 @@ connectAriEvents(async (event) => {
       await setEndpointSession(endpointId, { type: "call", token: callToken }, env.callTokenTtlSec);
 
       // Bridge and originate: same logic as previously in GET /calls/credentials
+      let bridgeId: string | undefined;
       try {
         app.log.info({ callToken, channelId, endpointId }, "STEP 1: Creating bridge and setting up originate");
         const bridge = await createBridge();
+        bridgeId = bridge.id;
         app.log.info({ bridgeId: bridge.id, channelId }, "STEP 2: Bridge created, adding incoming domophone channel");
         await new Promise((r) => setTimeout(r, 300));
         await addChannelToBridge(bridge.id, channelId);
@@ -319,25 +321,25 @@ connectAriEvents(async (event) => {
       app.log.info({ callId, tokensCount: tokens.length }, "FCM push (call) sent");
 
       // If nobody answers, auto-end the call on backend after ring timeout.
-      void (async () => {
-        try {
-          await new Promise((r) => setTimeout(r, env.ringTimeoutSec * 1000));
-          const stillActive = await getCallToken(callToken);
-          if (!stillActive) {
-            app.log.debug({ callToken, channelId }, "Call already ended, skipping timeout cleanup");
-            return;
-          }
+      // Capture bridgeId in closure
+      if (bridgeId) {
+        const capturedBridgeId = bridgeId;
+        void (async () => {
+          try {
+            await new Promise((r) => setTimeout(r, env.ringTimeoutSec * 1000));
+            const stillActive = await getCallToken(callToken);
+            if (!stillActive) {
+              app.log.debug({ callToken, channelId, bridgeId: capturedBridgeId }, "Call already ended, skipping timeout cleanup");
+              return;
+            }
 
-          app.log.warn({ callToken, channelId, ringTimeoutSec: env.ringTimeoutSec, callTokenTtlSec: env.callTokenTtlSec }, "Incoming call timed out - terminating bridge");
-          
-          // Get bridgeId from channel session
-          const channelSession = await getChannelSession<{ bridgeId?: string }>(channelId);
-          if (channelSession?.bridgeId) {
+            app.log.warn({ callToken, channelId, bridgeId: capturedBridgeId, ringTimeoutSec: env.ringTimeoutSec }, "Incoming call timed out - terminating bridge");
+            
             try {
-              await deleteBridge(channelSession.bridgeId);
-              app.log.info({ bridgeId: channelSession.bridgeId, callToken, channelId }, "Timed out bridge deleted - all channels terminated");
+              await deleteBridge(capturedBridgeId);
+              app.log.info({ bridgeId: capturedBridgeId, callToken, channelId }, "Timed out bridge deleted - all channels terminated");
             } catch (error) {
-              app.log.warn({ err: error, bridgeId: channelSession.bridgeId, callToken, channelId }, "Failed to delete timed out bridge, trying to hangup channel");
+              app.log.warn({ err: error, bridgeId: capturedBridgeId, callToken, channelId }, "Failed to delete timed out bridge, trying to hangup channel");
               // Fallback: if bridge is already deleted, try to hangup channel
               try {
                 await hangupChannel(channelId);
@@ -346,22 +348,13 @@ connectAriEvents(async (event) => {
                 app.log.warn({ err: hangupError, callToken, channelId }, "Failed to hangup timed out channel");
               }
             }
-          } else {
-            // No bridgeId in session, fallback to hangup channel
-            try {
-              await hangupChannel(channelId);
-              app.log.info({ callToken, channelId }, "Timed out channel hung up successfully (no bridge found)");
-            } catch (error) {
-              app.log.warn({ err: error, callToken, channelId }, "Failed to hangup timed out channel");
-            }
+          } catch (error) {
+            app.log.warn({ err: error, callToken }, "Failed to auto-end timed out call");
           }
-          // Не удаляем callToken сразу - даем время клиенту завершить звонок
-          // Redis очистит его автоматически по TTL (который больше ringTimeoutSec)
-          // callTokenTtlSec (300s) > ringTimeoutSec (60s), так что клиент успеет завершить звонок
-        } catch (error) {
-          app.log.warn({ err: error, callToken }, "Failed to auto-end timed out call");
-        }
-      })();
+        })();
+      } else {
+        app.log.warn({ callToken, channelId }, "No bridgeId available, skipping timeout setup");
+      }
     } catch (error) {
       app.log.error({ err: error }, "Failed to handle StasisStart");
     }
