@@ -14,6 +14,7 @@ import {
   subscribeToEndpointEvents,
   originateCall,
   getBridge,
+  deleteBridge,
 } from "./ari/client";
 import {
   listPushTokens,
@@ -30,6 +31,7 @@ import {
   setPendingOriginate,
   getPendingOriginate,
   deletePendingOriginate,
+  getChannelSession,
 } from "./store/redis";
 import { sendFcmPush } from "./push/fcm";
 import crypto from "crypto";
@@ -185,6 +187,13 @@ connectAriEvents(async (event) => {
           await addChannelToBridge(bridgeId, channelId);
           app.log.info({ channelId, bridgeId }, "Outgoing channel successfully added to bridge");
           
+          // Store bridgeId in outgoing channel session for cleanup
+          await setChannelSession(
+            channelId,
+            { bridgeId },
+            env.callTokenTtlSec
+          );
+          
           // Теперь нужно ответить на канал домофона
           // Получаем информацию о bridge, чтобы найти канал домофона
           try {
@@ -271,12 +280,6 @@ connectAriEvents(async (event) => {
       app.log.info({ callToken, channelId, endpointId, ttlSec: env.callTokenTtlSec }, "CallToken created and stored");
       await setEndpointSession(endpointId, { type: "call", token: callToken }, env.callTokenTtlSec);
 
-      await setChannelSession(
-        channelId,
-        { callToken, endpointId },
-        env.callTokenTtlSec
-      );
-
       // Bridge and originate: same logic as previously in GET /calls/credentials
       try {
         app.log.info({ callToken, channelId, endpointId }, "STEP 1: Creating bridge and setting up originate");
@@ -285,6 +288,14 @@ connectAriEvents(async (event) => {
         await new Promise((r) => setTimeout(r, 300));
         await addChannelToBridge(bridge.id, channelId);
         app.log.info({ bridgeId: bridge.id, channelId }, "STEP 3: Incoming domophone channel added to bridge");
+        
+        // Store bridgeId in channel session for cleanup
+        await setChannelSession(
+          channelId,
+          { callToken, endpointId, bridgeId: bridge.id },
+          env.callTokenTtlSec
+        );
+        
         await setPendingOriginate(endpointId, { bridgeId: bridge.id, channelId }, env.ringTimeoutSec);
         app.log.info({ endpointId, bridgeId: bridge.id }, "STEP 4: Pending originate stored, waiting for endpoint registration.");
       } catch (error) {
@@ -317,12 +328,32 @@ connectAriEvents(async (event) => {
             return;
           }
 
-          app.log.warn({ callToken, channelId, ringTimeoutSec: env.ringTimeoutSec, callTokenTtlSec: env.callTokenTtlSec }, "Incoming call timed out - hanging up channel");
-          try {
-            await hangupChannel(channelId);
-            app.log.info({ callToken, channelId }, "Timed out channel hung up successfully - callToken will remain for cleanup");
-          } catch (error) {
-            app.log.warn({ err: error, callToken, channelId }, "Failed to hangup timed out channel");
+          app.log.warn({ callToken, channelId, ringTimeoutSec: env.ringTimeoutSec, callTokenTtlSec: env.callTokenTtlSec }, "Incoming call timed out - terminating bridge");
+          
+          // Get bridgeId from channel session
+          const channelSession = await getChannelSession<{ bridgeId?: string }>(channelId);
+          if (channelSession?.bridgeId) {
+            try {
+              await deleteBridge(channelSession.bridgeId);
+              app.log.info({ bridgeId: channelSession.bridgeId, callToken, channelId }, "Timed out bridge deleted - all channels terminated");
+            } catch (error) {
+              app.log.warn({ err: error, bridgeId: channelSession.bridgeId, callToken, channelId }, "Failed to delete timed out bridge, trying to hangup channel");
+              // Fallback: if bridge is already deleted, try to hangup channel
+              try {
+                await hangupChannel(channelId);
+                app.log.info({ callToken, channelId }, "Timed out channel hung up successfully");
+              } catch (hangupError) {
+                app.log.warn({ err: hangupError, callToken, channelId }, "Failed to hangup timed out channel");
+              }
+            }
+          } else {
+            // No bridgeId in session, fallback to hangup channel
+            try {
+              await hangupChannel(channelId);
+              app.log.info({ callToken, channelId }, "Timed out channel hung up successfully (no bridge found)");
+            } catch (error) {
+              app.log.warn({ err: error, callToken, channelId }, "Failed to hangup timed out channel");
+            }
           }
           // Не удаляем callToken сразу - даем время клиенту завершить звонок
           // Redis очистит его автоматически по TTL (который больше ringTimeoutSec)
@@ -339,8 +370,26 @@ connectAriEvents(async (event) => {
   if (event.type === "StasisEnd" && typeof event.channel === "object" && event.channel) {
     const channel = event.channel as { id?: string };
     if (!channel.id) return;
-    // Не удаляем данные - Redis очистит их автоматически по TTL
-    app.log.debug({ channelId: channel.id }, "StasisEnd - relying on Redis TTL for cleanup");
+    const channelId = channel.id;
+    
+    app.log.info({ channelId }, "StasisEnd - channel terminated, cleaning up bridge");
+    
+    // Get bridgeId from channel session
+    const channelSession = await getChannelSession<{ bridgeId?: string }>(channelId);
+    if (channelSession?.bridgeId) {
+      try {
+        // Delete bridge - this will terminate all remaining channels (including domophone panel)
+        await deleteBridge(channelSession.bridgeId);
+        app.log.info({ bridgeId: channelSession.bridgeId, channelId }, "Bridge deleted on StasisEnd - all channels terminated");
+      } catch (error) {
+        // Bridge may already be deleted - this is OK
+        app.log.debug({ err: error, bridgeId: channelSession.bridgeId, channelId }, "Bridge already deleted or cleanup failed");
+      }
+    } else {
+      app.log.debug({ channelId }, "No bridgeId in channel session, skipping bridge cleanup");
+    }
+    
+    // Redis will cleanup session data automatically by TTL
   }
 });
 

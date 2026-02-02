@@ -232,38 +232,22 @@ else
 fi
 fi
 
-section "Настройка автоматического обновления сертификатов"
-if skip_if_done systemctl is-enabled --quiet certbot.timer 2>/dev/null && test -x /etc/letsencrypt/renewal-hooks/deploy/reload-services.sh 2>/dev/null; then
+section "Установка скрипта перезагрузки сервисов после обновления сертификатов"
+if skip_if_done test -x /etc/letsencrypt/renewal-hooks/deploy/reload-services.sh 2>/dev/null; then
   :
 else
-# Создаем директорию для хуков обновления
-mkdir -p /etc/letsencrypt/renewal-hooks/deploy
-
-# Проверяем, что таймер certbot активен
-systemctl enable certbot.timer >> "${LOG_FILE}" 2>&1
-systemctl start certbot.timer >> "${LOG_FILE}" 2>&1
-if systemctl is-active --quiet certbot.timer || systemctl is-enabled --quiet certbot.timer; then
-  ok "Таймер автоматического обновления сертификатов настроен"
-else
-  warn "Таймер certbot не активен. Смотри лог: ${LOG_FILE}"
-fi
-
-# Копируем скрипт для перезагрузки сервисов после обновления сертификатов
-# Certbot автоматически выполняет все исполняемые скрипты из renewal-hooks/deploy/
-# при успешном обновлении сертификатов (не требуется указывать --deploy-hook)
-if [[ -f "${CONFIG_DIR}/tools/reload-services.sh" ]]; then
-  cp "${CONFIG_DIR}/tools/reload-services.sh" /etc/letsencrypt/renewal-hooks/deploy/reload-services.sh
-  chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-services.sh
-  
-  # Проверяем, что файл успешно скопирован и исполняемый
-  if [[ -f /etc/letsencrypt/renewal-hooks/deploy/reload-services.sh ]] && [[ -x /etc/letsencrypt/renewal-hooks/deploy/reload-services.sh ]]; then
-    ok "Скрипт перезагрузки сервисов установлен"
+  mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+  if [[ -f "${CONFIG_DIR}/tools/reload-services.sh" ]]; then
+    cp "${CONFIG_DIR}/tools/reload-services.sh" /etc/letsencrypt/renewal-hooks/deploy/reload-services.sh
+    chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-services.sh
+    if [[ -x /etc/letsencrypt/renewal-hooks/deploy/reload-services.sh ]]; then
+      ok "Скрипт перезагрузки сервисов установлен"
+    else
+      warn "Ошибка установки скрипта перезагрузки сервисов. Смотри лог: ${LOG_FILE}"
+    fi
   else
-    warn "Ошибка установки скрипта перезагрузки сервисов. Смотри лог: ${LOG_FILE}"
+    warn "Скрипт reload-services.sh не найден в репозитории (configs/tools). Смотри лог: ${LOG_FILE}"
   fi
-else
-  warn "Скрипт reload-services.sh не найден в репозитории (configs/tools). Смотри лог: ${LOG_FILE}"
-fi
 fi
 
 section "Установка Asterisk"
