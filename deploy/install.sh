@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENV_FILE="${ROOT_DIR}/.env"
+ASTERISK_MAJOR="22"
+ASTERISK_TARBALL="asterisk-${ASTERISK_MAJOR}-current.tar.gz"
 CONFIG_DIR="${ROOT_DIR}/configs"
+ENV_FILE="${ROOT_DIR}/.env"
+FIREBASE_JSON_FILE=$(ls "${ROOT_DIR}"/*-firebase-adminsdk-*.json 2>/dev/null | head -n1) || true
 LOG_DIR="/opt/intercom-backend"
 LOG_FILE="${LOG_DIR}/install.log"
+NPM_VERSION="11.8.0"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ -t 1 ]]; then
   COLOR_BLUE="\033[34m"
@@ -103,12 +107,14 @@ run_with_spinner() {
   return ${status}
 }
 
-# Идемпотентность: пропуск шага, если уже выполнено (для продолжения с места остановки)
+wait_for_apt_idle() {
+  run_with_spinner "Ожидание завершения фоновых процессов ОС" \
+    "while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do sleep 2; done"
+}
+
 skip_if_done() {
-  local msg="$1"
-  shift
   if "$@"; then
-    ok "Пропуск (уже выполнено): ${msg}"
+    ok "Пропуск (уже выполнено)"
     return 0
   fi
   return 1
@@ -119,7 +125,6 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   exit 1
 fi
 
-FIREBASE_JSON_FILE=$(ls "${ROOT_DIR}"/*-firebase-adminsdk-*.json 2>/dev/null | head -n1) || true
 if [[ -z "${FIREBASE_JSON_FILE}" ]] || [[ ! -f "${FIREBASE_JSON_FILE}" ]]; then
   err "Файл ключа Firebase (*-firebase-adminsdk-*.json) не найден. Скопируйте JSON в корень репозитория."
   exit 1
@@ -157,8 +162,11 @@ require_var DOCKER_USER
 require_var DOCKER_PASSWORD
 ok "Переменные окружения найдены"
 
-if ! skip_if_done "системные пакеты (certbot, coturn, fail2ban, ufw)" command -v certbot >/dev/null 2>&1 && command -v ufw >/dev/null 2>&1 && command -v turnserver >/dev/null 2>&1 && command -v fail2ban-client >/dev/null 2>&1; then
 section "Обновление ОС и установка системных зависимостей"
+if skip_if_done command -v certbot >/dev/null 2>&1 && command -v ufw >/dev/null 2>&1 && command -v turnserver >/dev/null 2>&1 && command -v fail2ban-client >/dev/null 2>&1; then
+  :
+else
+wait_for_apt_idle
 run_with_spinner "Поиск и установка обновлений" "apt-get update -y"
 run_with_spinner "Установка certbot" "apt-get install -y certbot"
 run_with_spinner "Установка coturn" "apt-get install -y coturn"
@@ -185,8 +193,10 @@ else
 fi
 fi
 
-if ! skip_if_done "firewall (ufw)" sh -c 'ufw status 2>/dev/null | grep -q "Status: active"'; then
 section "Настройка firewall (ufw)"
+if skip_if_done sh -c 'ufw status 2>/dev/null | grep -q "Status: active"'; then
+  :
+else
 ufw allow ssh >> "${LOG_FILE}" 2>&1
 ufw allow 80/tcp >> "${LOG_FILE}" 2>&1
 ufw allow 443/tcp >> "${LOG_FILE}" 2>&1
@@ -209,8 +219,10 @@ else
 fi
 fi
 
-if ! skip_if_done "SSL сертификаты для ${SERVER_DOMAIN}" test -f "/etc/letsencrypt/live/${SERVER_DOMAIN}/fullchain.pem" -a -f "/etc/letsencrypt/live/${SERVER_DOMAIN}/privkey.pem"; then
 section "Получение SSL сертификатов Let's Encrypt"
+if skip_if_done test -f "/etc/letsencrypt/live/${SERVER_DOMAIN}/fullchain.pem" -a -f "/etc/letsencrypt/live/${SERVER_DOMAIN}/privkey.pem"; then
+  :
+else
 run_with_spinner "Получение сертификата для ${SERVER_DOMAIN}" "sleep 5 && certbot certonly --standalone --non-interactive --agree-tos --email admin@${SERVER_DOMAIN} -d ${SERVER_DOMAIN}"
 
 if [[ -d "/etc/letsencrypt/live/${SERVER_DOMAIN}" ]] && [[ -f "/etc/letsencrypt/live/${SERVER_DOMAIN}/fullchain.pem" ]] && [[ -f "/etc/letsencrypt/live/${SERVER_DOMAIN}/privkey.pem" ]]; then
@@ -220,8 +232,10 @@ else
 fi
 fi
 
-if ! skip_if_done "таймер certbot и скрипт перезагрузки" systemctl is-enabled --quiet certbot.timer 2>/dev/null && test -x /etc/letsencrypt/renewal-hooks/deploy/reload-services.sh 2>/dev/null; then
 section "Настройка автоматического обновления сертификатов"
+if skip_if_done systemctl is-enabled --quiet certbot.timer 2>/dev/null && test -x /etc/letsencrypt/renewal-hooks/deploy/reload-services.sh 2>/dev/null; then
+  :
+else
 # Создаем директорию для хуков обновления
 mkdir -p /etc/letsencrypt/renewal-hooks/deploy
 
@@ -252,14 +266,15 @@ else
 fi
 fi
 
-ASTERISK_MAJOR="22"
-ASTERISK_TARBALL="asterisk-${ASTERISK_MAJOR}-current.tar.gz"
-if ! skip_if_done "Asterisk (сборка из исходников)" test -x /usr/sbin/asterisk; then
 section "Установка Asterisk"
+if skip_if_done test -x /usr/sbin/asterisk; then
+  :
+else
 cd /usr/src
 run_with_spinner "Скачивание дистрибутива" "wget -q http://downloads.asterisk.org/pub/telephony/asterisk/${ASTERISK_TARBALL}"
 run_with_spinner "Распаковка дистрибутива" "tar xvf ${ASTERISK_TARBALL}"
 cd asterisk-${ASTERISK_MAJOR}.*
+wait_for_apt_idle
 run_with_spinner "Установка зависимостей" "./contrib/scripts/install_prereq install"
 run_with_spinner "Конфигурирование компонентов" "./configure --with-jansson-bundled"
 run_with_spinner "Подключение компонентов" "make menuselect/menuselect && make menuselect-tree && ./menuselect/menuselect --enable codec_opus --enable res_config_pgsql --disable CORE-SOUNDS-EN-GSM --enable CORE-SOUNDS-EN-WAV --enable CORE-SOUNDS-RU-WAV --enable MOH-OPSOUND-WAV"
@@ -269,8 +284,10 @@ asterisk_version_clean="$(extract_version "${asterisk_version}")"
 check_output_installed "Asterisk" "${asterisk_version_clean}"
 fi
 
-if ! skip_if_done "пользователь asterisk" id asterisk >/dev/null 2>&1; then
 section "Создание пользователя asterisk"
+if skip_if_done id asterisk >/dev/null 2>&1; then
+  :
+else
 if ! id asterisk >/dev/null 2>&1; then
   groupadd asterisk
   useradd -r -d /var/lib/asterisk -g asterisk asterisk
@@ -318,8 +335,10 @@ else
   warn "Ошибка копирования файлов конфигурации Asterisk. Смотри лог: ${LOG_FILE}"
 fi
 
-if ! skip_if_done "утилиты Asterisk-логов" test -x /usr/local/bin/asterisk-full-logs-on 2>/dev/null; then
-section "Утилиты управления Asterisk-логами"
+section "Установка утилиты управления Asterisk-логов"
+if skip_if_done test -x /usr/local/bin/asterisk-full-logs-on 2>/dev/null; then
+  :
+else
 mkdir -p /usr/local/bin
 if [[ -f "${CONFIG_DIR}/tools/asterisk-full-logs-on" ]] && [[ -f "${CONFIG_DIR}/tools/asterisk-full-logs-off" ]]; then
   cp "${CONFIG_DIR}/tools/asterisk-full-logs-on" /usr/local/bin/asterisk-full-logs-on
@@ -331,8 +350,10 @@ else
 fi
 fi
 
-if ! skip_if_done "Logrotate для Asterisk" test -s /etc/logrotate.d/asterisk 2>/dev/null; then
 section "Настройка Logrotate для Asterisk"
+if skip_if_done test -s /etc/logrotate.d/asterisk 2>/dev/null; then
+  :
+else
 mkdir -p /etc/logrotate.d
 cp "${CONFIG_DIR}/logrotate/asterisk" /etc/logrotate.d/asterisk
 cat /etc/logrotate.d/asterisk >> "${LOG_FILE}" 2>&1
@@ -346,8 +367,10 @@ else
 fi
 fi
 
-if ! skip_if_done "Coturn" test -s /etc/turnserver.conf 2>/dev/null && ! grep -q '__SERVER_IP__' /etc/turnserver.conf 2>/dev/null && systemctl is-active --quiet coturn 2>/dev/null; then
 section "Настройка Coturn"
+if skip_if_done test -s /etc/turnserver.conf 2>/dev/null && ! grep -q '__SERVER_IP__' /etc/turnserver.conf 2>/dev/null && systemctl is-active --quiet coturn 2>/dev/null; then
+  :
+else
 cp "${CONFIG_DIR}/coturn/turnserver.conf" /etc/turnserver.conf
 sed -i "s/__SERVER_IP__/${SERVER_IP}/g" /etc/turnserver.conf
 sed -i "s/__SERVER_DOMAIN__/${SERVER_DOMAIN}/g" /etc/turnserver.conf
@@ -369,9 +392,11 @@ else
 fi
 fi
 
-# Пропуск только если установлен Docker из пакетов (есть systemd-unit), а не из snap и т.п.
-if ! skip_if_done "Docker и Docker Compose" sh -c 'command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && ( test -f /lib/systemd/system/docker.service || test -f /usr/lib/systemd/system/docker.service )'; then
-section "Установка Docker"
+section "Установка Docker и Docker Compose"
+if skip_if_done sh -c 'command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && ( test -f /lib/systemd/system/docker.service || test -f /usr/lib/systemd/system/docker.service )'; then
+  :
+else
+wait_for_apt_idle
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 chmod a+r /etc/apt/keyrings/docker.gpg
@@ -386,37 +411,63 @@ check_output_installed "Docker" "${docker_version_clean}"
 check_output_installed "Docker Compose" "${compose_version_clean}"
 fi
 
-if ! skip_if_done "запуск Docker" systemctl is-active --quiet docker 2>/dev/null; then
 section "Запуск Docker"
+if skip_if_done systemctl is-active --quiet docker 2>/dev/null; then
+  :
+else
 systemctl enable docker >> "${LOG_FILE}" 2>&1
 systemctl start docker >> "${LOG_FILE}" 2>&1
 check_service "docker"
 fi
 
+DOCKER_IMAGES_EXIST=0
+if docker image inspect redis:7-alpine >/dev/null 2>&1 && docker image inspect postgres:18-alpine >/dev/null 2>&1; then
+  DOCKER_IMAGES_EXIST=1
+fi
+
 section "Авторизация в Docker Hub"
-login_output="$(echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USER}" --password-stdin 2>&1)"
-echo "${login_output}" >> "${LOG_FILE}" 2>&1
-if echo "${login_output}" | grep -qi "Login Succeeded"; then
-  ok "Login Succeeded"
+if [[ "${DOCKER_IMAGES_EXIST}" -eq 1 ]]; then
+  ok "Пропуск (уже выполнено)"
 else
-  err "${login_output}"
+  login_output="$(echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USER}" --password-stdin 2>&1)"
+  echo "${login_output}" >> "${LOG_FILE}" 2>&1
+  if echo "${login_output}" | grep -qi "Login Succeeded"; then
+    ok "Login Succeeded"
+  else
+    err "${login_output}"
+  fi
 fi
 
-if ! skip_if_done "Redis и Postgres (Docker Compose)" sh -c "cd \"${ROOT_DIR}\" && docker compose ps --services --filter status=running 2>/dev/null | grep -q '^redis$' && docker compose ps --services --filter status=running 2>/dev/null | grep -q '^postgres$'"; then
+section "Скачивание образов Redis и Postgres"
+if [[ "${DOCKER_IMAGES_EXIST}" -eq 1 ]]; then
+  ok "Пропуск (уже выполнено)"
+else
+  cd "${ROOT_DIR}"
+  run_with_spinner "docker compose pull" "docker compose pull"
+  cd - >/dev/null
+  ok "Образы скачаны"
+fi
+
 section "Запуск Redis и Postgres через Docker Compose"
-cd "${ROOT_DIR}"
-run_with_spinner "docker compose up" "docker compose up -d"
-docker compose ps >> "${LOG_FILE}" 2>&1
-if docker compose ps --services --filter status=running | grep -q '^redis$' \
-  && docker compose ps --services --filter status=running | grep -q '^postgres$'; then
-  ok "Redis и Postgres запущены"
+if skip_if_done sh -c "cd \"${ROOT_DIR}\" && docker compose ps --services --filter status=running 2>/dev/null | grep -q '^redis$' && docker compose ps --services --filter status=running 2>/dev/null | grep -q '^postgres$'"; then
+  :
 else
-  warn "Redis и Postgres не запущены. Смотри лог: ${LOG_FILE}"
-fi
+  cd "${ROOT_DIR}"
+  run_with_spinner "docker compose up" "docker compose up -d"
+  docker compose ps >> "${LOG_FILE}" 2>&1
+  if docker compose ps --services --filter status=running | grep -q '^redis$' \
+    && docker compose ps --services --filter status=running | grep -q '^postgres$'; then
+    ok "Redis и Postgres запущены"
+  else
+    warn "Redis и Postgres не запущены. Смотри лог: ${LOG_FILE}"
+  fi
+  cd - >/dev/null
 fi
 
-if ! skip_if_done "сервис Asterisk" systemctl is-active --quiet asterisk 2>/dev/null; then
-section "Установка сервиса Asterisk"
+section "Запуск сервиса Asterisk"
+if skip_if_done systemctl is-active --quiet asterisk 2>/dev/null; then
+  :
+else
 cp "${CONFIG_DIR}/asterisk/asterisk.service" /etc/systemd/system/asterisk.service
 systemctl daemon-reload
 systemctl enable asterisk >> "${LOG_FILE}" 2>&1
@@ -429,8 +480,10 @@ else
 fi
 fi
 
-if ! skip_if_done "fail2ban" test -s /etc/fail2ban/jail.local 2>/dev/null && systemctl is-active --quiet fail2ban 2>/dev/null; then
 section "Настройка fail2ban"
+if skip_if_done test -s /etc/fail2ban/jail.local 2>/dev/null && systemctl is-active --quiet fail2ban 2>/dev/null; then
+  :
+else
 mkdir -p /etc/fail2ban/filter.d
 cp "${CONFIG_DIR}/fail2ban/jail.local" /etc/fail2ban/jail.local
 cp "${CONFIG_DIR}/fail2ban/filter.d/asterisk.conf" /etc/fail2ban/filter.d/asterisk.conf
@@ -446,8 +499,11 @@ fi
 fail2ban-client status >> "${LOG_FILE}" 2>&1 || true
 fi
 
-if ! skip_if_done "Node.js" command -v node >/dev/null 2>&1; then
 section "Установка Node.js (LTS 24.x)"
+if skip_if_done command -v node >/dev/null 2>&1; then
+  :
+else
+wait_for_apt_idle
 run_with_spinner "Скачивание дистрибутива" "curl -fsSL https://deb.nodesource.com/setup_24.x | bash -"
 run_with_spinner "Установка" "apt-get install -y nodejs"
 node_version="$(node -v 2>/dev/null || true)"
@@ -456,13 +512,19 @@ check_output_installed "Node.js" "${node_version_clean}"
 fi
 
 section "Обновление npm"
-run_with_spinner "Обновление npm" "npm install -g npm@latest"
-npm_version="$(npm -v 2>/dev/null || true)"
-npm_version_clean="$(extract_version "${npm_version}")"
-check_output_installed "npm" "${npm_version_clean}"
+if skip_if_done test "$(extract_version "$(npm -v 2>/dev/null || true)")" = "${NPM_VERSION}"; then
+  :
+else
+  run_with_spinner "Обновление npm" "npm install -g npm@${NPM_VERSION}"
+  npm_version="$(npm -v 2>/dev/null || true)"
+  npm_version_clean="$(extract_version "${npm_version}")"
+  check_output_installed "npm" "${npm_version_clean}"
+fi
 
-if ! skip_if_done "установка intercom-backend" test -f /opt/intercom-backend/package.json; then
-  section "Установка сервера"
+section "Установка сервера intercom-backend"
+if skip_if_done test -f /opt/intercom-backend/package.json; then
+  :
+else
   mkdir -p /opt/intercom-backend
   rsync -a --delete --exclude 'install.log' "${ROOT_DIR}/" /opt/intercom-backend/
   cd /opt/intercom-backend
@@ -475,8 +537,10 @@ if ! skip_if_done "установка intercom-backend" test -f /opt/intercom-ba
 fi
 
 BACKEND_RUNNING=0
-if ! skip_if_done "запуск intercom-backend" systemctl is-active --quiet intercom-backend 2>/dev/null; then
-  section "Запуск сервера"
+section "Запуск сервера intercom-backend"
+if skip_if_done systemctl is-active --quiet intercom-backend 2>/dev/null; then
+  BACKEND_RUNNING=1
+else
   run_with_spinner "Запуск сервера" "systemctl start intercom-backend"
   if systemctl is-active --quiet intercom-backend; then
     ok "Сервис запущен"
@@ -484,15 +548,11 @@ if ! skip_if_done "запуск intercom-backend" systemctl is-active --quiet in
   else
     warn "Сервис не запущен. Смотри лог: ${LOG_FILE}"
   fi
-else
-  BACKEND_RUNNING=1
 fi
 
 # Проверка доступности только если сервис запущен
 if [[ "${BACKEND_RUNNING}" -eq 1 ]]; then
   section "Проверка доступности сервера"
-  sleep 2
-  health_output=""
   if [[ -f "/etc/letsencrypt/live/${SERVER_DOMAIN}/fullchain.pem" ]] && [[ -f "/etc/letsencrypt/live/${SERVER_DOMAIN}/privkey.pem" ]]; then
     health_url="https://127.0.0.1:${APP_PORT:-3000}/health"
     health_opts="-fsSk"
@@ -500,14 +560,9 @@ if [[ "${BACKEND_RUNNING}" -eq 1 ]]; then
     health_url="http://127.0.0.1:${APP_PORT:-3000}/health"
     health_opts="-fsS"
   fi
-  for _ in {1..10}; do
-    health_output="$(curl ${health_opts} "${health_url}" 2>/dev/null || true)"
-    if [[ -n "${health_output}" ]]; then
-      break
-    fi
-    sleep 1
-  done
-  if [[ -n "${health_output}" ]]; then
+  health_ok=0
+  run_with_spinner "Проверка доступности сервера" "sleep 2; for i in 1 2 3 4 5 6 7 8 9 10; do if curl ${health_opts} '${health_url}' >/dev/null 2>&1; then exit 0; fi; sleep 1; done; exit 1" || health_ok=1
+  if [[ ${health_ok} -eq 0 ]]; then
     ok "Сервер доступен"
   else
     warn "Сервер недоступен. Смотри лог: ${LOG_FILE}"
@@ -515,6 +570,7 @@ if [[ "${BACKEND_RUNNING}" -eq 1 ]]; then
 fi
 
 section "Завершение установки"
+wait_for_apt_idle
 echo "Удаление неиспользуемых зависимостей и следов установок ..."
 apt-get -y autoremove >> "${LOG_FILE}" 2>&1
 apt-get -y clean >> "${LOG_FILE}" 2>&1
