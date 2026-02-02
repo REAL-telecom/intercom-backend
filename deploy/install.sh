@@ -119,8 +119,8 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   exit 1
 fi
 
-FIREBASE_JSON_FILE=$(ls "${ROOT_DIR}"/*-firebase-adminsdk-*.json 2>/dev/null | head -n1)
-if [[ ! -f "${FIREBASE_JSON_FILE}" ]]; then
+FIREBASE_JSON_FILE=$(ls "${ROOT_DIR}"/*-firebase-adminsdk-*.json 2>/dev/null | head -n1) || true
+if [[ -z "${FIREBASE_JSON_FILE}" ]] || [[ ! -f "${FIREBASE_JSON_FILE}" ]]; then
   err "Файл ключа Firebase (*-firebase-adminsdk-*.json) не найден. Скопируйте JSON в корень репозитория."
   exit 1
 fi
@@ -461,7 +461,6 @@ npm_version="$(npm -v 2>/dev/null || true)"
 npm_version_clean="$(extract_version "${npm_version}")"
 check_output_installed "npm" "${npm_version_clean}"
 
-# Установка сервера — пропуск по наличию файлов
 if ! skip_if_done "установка intercom-backend" test -f /opt/intercom-backend/package.json; then
   section "Установка сервера"
   mkdir -p /opt/intercom-backend
@@ -475,7 +474,6 @@ if ! skip_if_done "установка intercom-backend" test -f /opt/intercom-ba
   ok "Сервер установлен"
 fi
 
-# Запуск сервера — пропуск если уже запущен
 BACKEND_RUNNING=0
 if ! skip_if_done "запуск intercom-backend" systemctl is-active --quiet intercom-backend 2>/dev/null; then
   section "Запуск сервера"
@@ -495,8 +493,15 @@ if [[ "${BACKEND_RUNNING}" -eq 1 ]]; then
   section "Проверка доступности сервера"
   sleep 2
   health_output=""
+  if [[ -f "/etc/letsencrypt/live/${SERVER_DOMAIN}/fullchain.pem" ]] && [[ -f "/etc/letsencrypt/live/${SERVER_DOMAIN}/privkey.pem" ]]; then
+    health_url="https://127.0.0.1:${APP_PORT:-3000}/health"
+    health_opts="-fsSk"
+  else
+    health_url="http://127.0.0.1:${APP_PORT:-3000}/health"
+    health_opts="-fsS"
+  fi
   for _ in {1..10}; do
-    health_output="$(curl -fsS "http://127.0.0.1:${APP_PORT:-3000}/health" 2>/dev/null || true)"
+    health_output="$(curl ${health_opts} "${health_url}" 2>/dev/null || true)"
     if [[ -n "${health_output}" ]]; then
       break
     fi
