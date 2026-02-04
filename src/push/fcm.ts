@@ -24,6 +24,8 @@ export type FcmCallPayload = {
   callId: string;
   sipCredentials: string;
   address?: string;
+  /** Backend base URL for API calls (e.g. reject/end call). */
+  backendUrl?: string;
 };
 
 /**
@@ -44,6 +46,9 @@ export const sendFcmPush = async (
   };
   if (payload.address != null && payload.address !== "") {
     data.address = payload.address;
+  }
+  if (payload.backendUrl != null && payload.backendUrl !== "") {
+    data.backendUrl = payload.backendUrl;
   }
   const results = await Promise.allSettled(
     tokens.map((token) =>

@@ -312,11 +312,13 @@ connectAriEvents(async (event) => {
       }
 
       const sipCredentials = { username: sipUsername, password: sipPassword, domain: env.serverDomain, port: 5060 };
+      const backendUrl = `${hasCertificates ? "https" : "http"}://${env.serverDomain}`;
       app.log.info({ callId, tokensCount: tokens.length }, "Sending FCM push (call, data-only)");
       await sendFcmPush(tokens, {
         type: "SIP_CALL",
         callId,
         sipCredentials: JSON.stringify(sipCredentials),
+        backendUrl,
       });
       app.log.info({ callId, tokensCount: tokens.length }, "FCM push (call) sent");
 
@@ -333,20 +335,21 @@ connectAriEvents(async (event) => {
               return;
             }
 
-            app.log.warn({ callToken, channelId, bridgeId: capturedBridgeId, ringTimeoutSec: env.ringTimeoutSec }, "Incoming call timed out - terminating bridge");
+            app.log.warn({ callToken, channelId, bridgeId: capturedBridgeId, ringTimeoutSec: env.ringTimeoutSec }, "Incoming call timed out - hanging up domophone channel");
             
+            // Hang up domophone channel first (Asterisk does not hang up channels when bridge is deleted)
+            try {
+              await hangupChannel(channelId);
+              app.log.info({ channelId, callToken }, "Timed out: domophone channel hung up");
+            } catch (hangupError) {
+              app.log.warn({ err: hangupError, channelId }, "Failed to hangup timed out channel");
+            }
+            // Then delete bridge to clean up any other channels
             try {
               await deleteBridge(capturedBridgeId);
-              app.log.info({ bridgeId: capturedBridgeId, callToken, channelId }, "Timed out bridge deleted - all channels terminated");
+              app.log.info({ bridgeId: capturedBridgeId }, "Timed out: bridge deleted");
             } catch (error) {
-              app.log.warn({ err: error, bridgeId: capturedBridgeId, callToken, channelId }, "Failed to delete timed out bridge, trying to hangup channel");
-              // Fallback: if bridge is already deleted, try to hangup channel
-              try {
-                await hangupChannel(channelId);
-                app.log.info({ callToken, channelId }, "Timed out channel hung up successfully");
-              } catch (hangupError) {
-                app.log.warn({ err: hangupError, callToken, channelId }, "Failed to hangup timed out channel");
-              }
+              app.log.debug({ err: error, bridgeId: capturedBridgeId }, "Bridge already deleted or delete failed");
             }
           } catch (error) {
             app.log.warn({ err: error, callToken }, "Failed to auto-end timed out call");
@@ -370,13 +373,24 @@ connectAriEvents(async (event) => {
     // Get bridgeId from channel session
     const channelSession = await getChannelSession<{ bridgeId?: string }>(channelId);
     if (channelSession?.bridgeId) {
+      const bridgeId = channelSession.bridgeId;
       try {
-        // Delete bridge - this will terminate all remaining channels (including domophone panel)
-        await deleteBridge(channelSession.bridgeId);
-        app.log.info({ bridgeId: channelSession.bridgeId, channelId }, "Bridge deleted on StasisEnd - all channels terminated");
+        // Hang up all remaining channels in the bridge (Asterisk does not hang up when bridge is deleted)
+        const bridgeInfo = await getBridge(bridgeId);
+        if (bridgeInfo?.channels?.length) {
+          for (const chId of bridgeInfo.channels) {
+            try {
+              await hangupChannel(chId);
+              app.log.info({ channelId: chId, bridgeId }, "StasisEnd: hung up channel in bridge");
+            } catch (err) {
+              app.log.debug({ err, channelId: chId }, "StasisEnd: channel already gone");
+            }
+          }
+        }
+        await deleteBridge(bridgeId);
+        app.log.info({ bridgeId, channelId }, "StasisEnd: bridge deleted");
       } catch (error) {
-        // Bridge may already be deleted - this is OK
-        app.log.debug({ err: error, bridgeId: channelSession.bridgeId, channelId }, "Bridge already deleted or cleanup failed");
+        app.log.debug({ err: error, bridgeId, channelId }, "StasisEnd: bridge already deleted or cleanup failed");
       }
     } else {
       app.log.debug({ channelId }, "No bridgeId in channel session, skipping bridge cleanup");
