@@ -324,7 +324,7 @@ connectAriEvents(async (event) => {
         callId,
         sipCredentials: JSON.stringify(sipCredentials),
         backendUrl,
-        address: address ?? undefined,
+        ...(address ? { address } : {}),
       });
       app.log.info({ callId, tokensCount: tokens.length }, "FCM push (call) sent");
 
