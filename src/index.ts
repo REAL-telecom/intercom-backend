@@ -21,6 +21,7 @@ import {
   createTempSipEndpoint,
   deleteTempSipEndpoint,
   listTempSipEndpoints,
+  getAddressByEndpointId,
 } from "./store/postgres";
 import {
   setCallToken,
@@ -167,7 +168,7 @@ connectAriEvents(async (event) => {
 
   if (event.type === "StasisStart" && typeof event.channel === "object" && event.channel) {
     app.log.info({ fullEvent: JSON.stringify(event) }, "StasisStart event - full data");
-    const channel = event.channel as { id?: string };
+    const channel = event.channel as { id?: string; name?: string };
     if (!channel.id) {
       app.log.warn({ event }, "StasisStart event without channel.id");
       return;
@@ -245,6 +246,11 @@ connectAriEvents(async (event) => {
       // Это нужно для правильной установки соединения
       app.log.info({ channelId }, "Incoming domophone channel received, will answer after client connects");
 
+      // PJSIP channel name is like "PJSIP/endpoint_id-<uniq>"; extract endpoint_id for address lookup
+      const namePart = channel.name?.split("/")[1];
+      const domophoneEndpointId = namePart ? namePart.split("-")[0] : null;
+      const address = domophoneEndpointId ? await getAddressByEndpointId(domophoneEndpointId) : null;
+
       const callId = crypto.randomUUID();
       const callToken = crypto.randomUUID();
       const endpointId = `tmp_${callId}`;
@@ -318,6 +324,7 @@ connectAriEvents(async (event) => {
         callId,
         sipCredentials: JSON.stringify(sipCredentials),
         backendUrl,
+        address: address ?? undefined,
       });
       app.log.info({ callId, tokensCount: tokens.length }, "FCM push (call) sent");
 

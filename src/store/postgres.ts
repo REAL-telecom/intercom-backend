@@ -96,6 +96,12 @@ export const ensureSchema = async () => {
     CREATE UNIQUE INDEX IF NOT EXISTS push_tokens_unique
     ON push_tokens (user_id, push_token);
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS endpoint_addresses (
+      endpoint_id TEXT PRIMARY KEY,
+      address TEXT NOT NULL
+    );
+  `);
 };
 
 /**
@@ -132,6 +138,18 @@ export const ensureUser = async (userId: string) => {
     `,
     [userId]
   );
+};
+
+/**
+ * Get display address for a PJSIP endpoint (e.g. doorphone). Used for FCM push subtitle.
+ */
+export const getAddressByEndpointId = async (endpointId: string): Promise<string | null> => {
+  const result = await pool.query(
+    `SELECT address FROM endpoint_addresses WHERE endpoint_id = $1`,
+    [endpointId]
+  );
+  const row = result.rows[0] as { address: string } | undefined;
+  return row?.address ?? null;
 };
 
 /**
