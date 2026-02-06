@@ -271,7 +271,6 @@ connectAriEvents(async (event) => {
               username: sipUsername,
               password: sipPassword,
               domain: env.serverDomain,
-              port: 5060,
             },
           },
         },
@@ -311,7 +310,7 @@ connectAriEvents(async (event) => {
         return;
       }
 
-      const sipCredentials = { username: sipUsername, password: sipPassword, domain: env.serverDomain, port: 5060 };
+      const sipCredentials = { username: sipUsername, password: sipPassword, domain: env.serverDomain };
       const backendUrl = `${hasCertificates ? "https" : "http"}://${env.serverDomain}`;
       app.log.info({ callId, tokensCount: tokens.length }, "Sending FCM push (call, data-only)");
       await sendFcmPush(tokens, {

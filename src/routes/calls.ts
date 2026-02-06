@@ -12,7 +12,6 @@ type CredentialsPayload = {
       username: string;
       password: string;
       domain: string;
-      port: number;
     };
   };
 };
@@ -43,7 +42,6 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
           username: sipUsername,
           password: sipPassword,
           domain: env.serverDomain,
-          port: 5060,
         },
       },
     };
