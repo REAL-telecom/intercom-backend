@@ -457,11 +457,9 @@ else
 mkdir -p /etc/fail2ban/filter.d
 cp "${CONFIG_DIR}/fail2ban/jail.local" /etc/fail2ban/jail.local
 cp "${CONFIG_DIR}/fail2ban/filter.d/asterisk.conf" /etc/fail2ban/filter.d/asterisk.conf
-if [[ -s "${CONFIG_DIR}/fail2ban/fail2ban.sqlite3" ]]; then
-  cp "${CONFIG_DIR}/fail2ban/fail2ban.sqlite3" /var/lib/fail2ban/fail2ban.sqlite3
-  chown root:root /var/lib/fail2ban/fail2ban.sqlite3
-  chmod 600 /var/lib/fail2ban/fail2ban.sqlite3
-fi
+cp "${CONFIG_DIR}/fail2ban/fail2ban.sqlite3" /var/lib/fail2ban/fail2ban.sqlite3
+chown root:root /var/lib/fail2ban/fail2ban.sqlite3
+chmod 600 /var/lib/fail2ban/fail2ban.sqlite3
 systemctl enable fail2ban >> "${LOG_FILE}" 2>&1
 systemctl start fail2ban >> "${LOG_FILE}" 2>&1
 if [[ -s /etc/fail2ban/jail.local ]] \
@@ -541,7 +539,6 @@ else
   fi
 fi
 
-# Проверка доступности только если сервис запущен
 if [[ "${BACKEND_RUNNING}" -eq 1 ]]; then
   section "Проверка доступности сервера"
   if [[ -f "/etc/letsencrypt/live/${SERVER_DOMAIN}/fullchain.pem" ]] && [[ -f "/etc/letsencrypt/live/${SERVER_DOMAIN}/privkey.pem" ]]; then
