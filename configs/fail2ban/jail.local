@@ -1,3 +1,4 @@
+# Инструкции и описание сервиса: configs/fail2ban/README.md
 [DEFAULT]
 findtime = 600
 maxretry = 5
@@ -8,8 +9,10 @@ enabled = true
 filter = asterisk
 logpath = /var/log/asterisk/messages
 backend = auto
-ignoreip = 127.0.0.1/8 ::1
-# Добавьте сюда IP домофона(ов), чтобы их не банило во время Digest-challenge/отладки.
-# Пример:
-# ignoreip = 127.0.0.1/8 ::1 176.100.64.203
+# TODO: удалить тестовые IP из ignoreip перед продакшеном: 176.100.0.0/16 194.87.108.130
+ignoreip = 127.0.0.1/8 ::1 176.100.0.0/16 194.87.108.130
 action = iptables-allports[name=ASTERISK, protocol=all]
+
+[sshd]
+# TODO: удалить тестовые IP из ignoreip перед продакшеном: 176.100.0.0/16 194.87.108.130
+ignoreip = 127.0.0.1/8 ::1 176.100.0.0/16 194.87.108.130

@@ -296,6 +296,7 @@ mkdir -p /etc/asterisk
 cp "${CONFIG_DIR}/asterisk/"*.conf /etc/asterisk/
 
 sed -i "s/__SERVER_IP__/${SERVER_IP}/g" /etc/asterisk/rtp.conf
+sed -i "s/__SERVER_IP__/${SERVER_IP}/g" /etc/asterisk/pjsip.conf
 sed -i "s/__SERVER_DOMAIN__/${SERVER_DOMAIN}/g" /etc/asterisk/http.conf
 sed -i "s/__SERVER_DOMAIN__/${SERVER_DOMAIN}/g" /etc/asterisk/pjsip.conf
 sed -i "s/__ARI_USER__/${ARI_USER}/g" /etc/asterisk/ari.conf
@@ -310,6 +311,7 @@ if [[ -s /etc/asterisk/ari.conf ]] \
   && [[ -s /etc/asterisk/rtp.conf ]] \
   && [[ -s /etc/asterisk/res_pgsql.conf ]] \
   && ! grep -q '__SERVER_IP__' /etc/asterisk/rtp.conf \
+  && ! grep -q '__SERVER_IP__' /etc/asterisk/pjsip.conf \
   && ! grep -q '__SERVER_DOMAIN__' /etc/asterisk/http.conf \
   && ! grep -q '__SERVER_DOMAIN__' /etc/asterisk/pjsip.conf \
   && ! grep -q '__ARI_USER__' /etc/asterisk/ari.conf \
@@ -352,7 +354,7 @@ fi
 fi
 
 section "Настройка Coturn"
-if skip_if_done test -s /etc/turnserver.conf 2>/dev/null && ! grep -q '__SERVER_IP__' /etc/turnserver.conf 2>/dev/null && systemctl is-active --quiet coturn 2>/dev/null; then
+if skip_if_done grep -q 'intercom-backend deploy' /etc/turnserver.conf 2>/dev/null && systemctl is-active --quiet coturn 2>/dev/null; then
   :
 else
 cp "${CONFIG_DIR}/coturn/turnserver.conf" /etc/turnserver.conf
@@ -362,7 +364,7 @@ sed -i "s/__TURN_USER__/${TURN_USER}/g" /etc/turnserver.conf
 sed -i "s/__TURN_PASSWORD__/${TURN_PASSWORD}/g" /etc/turnserver.conf
 
 systemctl enable coturn >> "${LOG_FILE}" 2>&1
-systemctl start coturn
+systemctl restart coturn
 systemctl status coturn --no-pager | sed -n '1,20p' >> "${LOG_FILE}" 2>&1
 if [[ -s /etc/turnserver.conf ]] \
   && ! grep -q '__SERVER_IP__' /etc/turnserver.conf \
@@ -448,6 +450,30 @@ else
   cd - >/dev/null
 fi
 
+section "Настройка fail2ban"
+if skip_if_done test -s /etc/fail2ban/jail.local 2>/dev/null && systemctl is-active --quiet fail2ban 2>/dev/null; then
+  :
+else
+mkdir -p /etc/fail2ban/filter.d
+cp "${CONFIG_DIR}/fail2ban/jail.local" /etc/fail2ban/jail.local
+cp "${CONFIG_DIR}/fail2ban/filter.d/asterisk.conf" /etc/fail2ban/filter.d/asterisk.conf
+if [[ -s "${CONFIG_DIR}/fail2ban/fail2ban.sqlite3" ]]; then
+  cp "${CONFIG_DIR}/fail2ban/fail2ban.sqlite3" /var/lib/fail2ban/fail2ban.sqlite3
+  chown root:root /var/lib/fail2ban/fail2ban.sqlite3
+  chmod 600 /var/lib/fail2ban/fail2ban.sqlite3
+fi
+systemctl enable fail2ban >> "${LOG_FILE}" 2>&1
+systemctl start fail2ban >> "${LOG_FILE}" 2>&1
+if [[ -s /etc/fail2ban/jail.local ]] \
+  && [[ -s /etc/fail2ban/filter.d/asterisk.conf ]] \
+  && systemctl is-active --quiet fail2ban; then
+  ok "fail2ban настроен"
+else
+  warn "fail2ban не настроен. Смотри лог: ${LOG_FILE}"
+fi
+fail2ban-client status >> "${LOG_FILE}" 2>&1 || true
+fi
+
 section "Запуск сервиса Asterisk"
 if skip_if_done systemctl is-active --quiet asterisk 2>/dev/null; then
   :
@@ -462,25 +488,6 @@ if [[ -s /etc/systemd/system/asterisk.service ]] \
 else
   warn "Asterisk не запущен. Смотри лог: ${LOG_FILE}"
 fi
-fi
-
-section "Настройка fail2ban"
-if skip_if_done test -s /etc/fail2ban/jail.local 2>/dev/null && systemctl is-active --quiet fail2ban 2>/dev/null; then
-  :
-else
-mkdir -p /etc/fail2ban/filter.d
-cp "${CONFIG_DIR}/fail2ban/jail.local" /etc/fail2ban/jail.local
-cp "${CONFIG_DIR}/fail2ban/filter.d/asterisk.conf" /etc/fail2ban/filter.d/asterisk.conf
-systemctl enable fail2ban >> "${LOG_FILE}" 2>&1
-systemctl restart fail2ban >> "${LOG_FILE}" 2>&1
-if [[ -s /etc/fail2ban/jail.local ]] \
-  && [[ -s /etc/fail2ban/filter.d/asterisk.conf ]] \
-  && systemctl is-active --quiet fail2ban; then
-  ok "fail2ban настроен"
-else
-  warn "fail2ban не настроен. Смотри лог: ${LOG_FILE}"
-fi
-fail2ban-client status >> "${LOG_FILE}" 2>&1 || true
 fi
 
 section "Установка Node.js (LTS 24.x)"
