@@ -34,7 +34,7 @@ import {
   deletePendingOriginate,
   getChannelSession,
 } from "./store/redis";
-import { sendFcmPush } from "./push/fcm";
+import { sendFcmPush, sendFcmCallEnded } from "./push/fcm";
 import crypto from "crypto";
 
 const config = {
@@ -296,10 +296,10 @@ connectAriEvents(async (event) => {
         await addChannelToBridge(bridge.id, channelId);
         app.log.info({ bridgeId: bridge.id, channelId }, "STEP 3: Incoming domophone channel added to bridge");
         
-        // Store bridgeId in channel session for cleanup
+        // Store bridgeId and address in channel session for cleanup and call-ended push
         await setChannelSession(
           channelId,
-          { callToken, endpointId, bridgeId: bridge.id },
+          { callToken, endpointId, bridgeId: bridge.id, address: address ?? "" },
           env.callTokenTtlSec
         );
         
@@ -376,8 +376,11 @@ connectAriEvents(async (event) => {
     
     app.log.info({ channelId }, "StasisEnd - channel terminated, cleaning up bridge");
     
-    // Get bridgeId from channel session
-    const channelSession = await getChannelSession<{ bridgeId?: string }>(channelId);
+    const channelSession = await getChannelSession<{
+      bridgeId?: string;
+      endpointId?: string;
+      address?: string;
+    }>(channelId);
     if (channelSession?.bridgeId) {
       const bridgeId = channelSession.bridgeId;
       try {
@@ -400,6 +403,22 @@ connectAriEvents(async (event) => {
       }
     } else {
       app.log.debug({ channelId }, "No bridgeId in channel session, skipping bridge cleanup");
+    }
+
+    // If this is the domophone channel (caller hung up), notify the app with SIP_CALL_ENDED
+    if (channelSession?.endpointId?.startsWith("tmp_")) {
+      const callId = channelSession.endpointId.replace(/^tmp_/, "");
+      const address = channelSession.address ?? "";
+      try {
+        const tokens = await listPushTokens(env.realphone);
+        if (tokens.length > 0) {
+          app.log.info({ callId, tokensCount: tokens.length }, "Sending FCM call-ended push");
+          await sendFcmCallEnded(tokens, { callId, address });
+          app.log.info({ callId }, "FCM call-ended push sent");
+        }
+      } catch (error) {
+        app.log.warn({ err: error, callId }, "Failed to send FCM call-ended push");
+      }
     }
     
     // Redis will cleanup session data automatically by TTL

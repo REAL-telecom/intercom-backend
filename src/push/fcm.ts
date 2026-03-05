@@ -67,3 +67,43 @@ export const sendFcmPush = async (
     );
   }
 };
+
+export type FcmCallEndedPayload = {
+  type: "SIP_CALL_ENDED";
+  callId: string;
+  address: string;
+};
+
+/**
+ * Send data-only FCM "call ended" (caller hung up).
+ * Separate from sendFcmPush for easier maintenance.
+ */
+export const sendFcmCallEnded = async (
+  tokens: string[],
+  payload: { callId: string; address: string }
+): Promise<void> => {
+  if (tokens.length === 0) return;
+  ensureFirebase();
+  const messaging = admin.messaging();
+  const data: Record<string, string> = {
+    type: "SIP_CALL_ENDED",
+    callId: payload.callId,
+    address: payload.address ?? "",
+  };
+  const results = await Promise.allSettled(
+    tokens.map((token) =>
+      messaging.send({
+        token,
+        data,
+        android: { priority: "high" as const },
+      })
+    )
+  );
+  const failed = results.filter((r) => r.status === "rejected");
+  if (failed.length > 0) {
+    const first = (failed[0] as PromiseRejectedResult).reason;
+    throw new Error(
+      `FCM call-ended send failed for ${failed.length}/${tokens.length} tokens: ${first?.message ?? first}`
+    );
+  }
+};
