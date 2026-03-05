@@ -19,25 +19,35 @@ function ensureFirebase() {
   initialized = true;
 }
 
-async function sendFcm(tokens: string[], data: Record<string, string>): Promise<void> {
-  if (tokens.length === 0) return;
+/**
+ * Send FCM data message to multiple tokens. Returns tokens for which send failed
+ * (caller removes them from DB). Does not throw on partial failure.
+ */
+async function sendFcm(
+  tokens: string[],
+  data: Record<string, string>
+): Promise<{ invalidTokens: string[] }> {
+  const invalidTokens: string[] = [];
+  if (tokens.length === 0) return { invalidTokens };
   ensureFirebase();
-  const results = await Promise.allSettled(
-    tokens.map((token) =>
-      admin.messaging().send({
-        token,
-        data,
-        android: { priority: "high" as const },
-      })
-    )
-  );
-  const failed = results.filter((r) => r.status === "rejected");
-  if (failed.length > 0) {
-    const first = (failed[0] as PromiseRejectedResult).reason;
-    throw new Error(
-      `FCM send failed for ${failed.length}/${tokens.length} tokens: ${first?.message ?? first}`
-    );
+  const message = {
+    tokens,
+    data,
+    android: { priority: "high" as const },
+  };
+  try {
+    const batch = await admin.messaging().sendEachForMulticast(message);
+    batch.responses.forEach((resp, i) => {
+      if (!resp.success) {
+        const token = tokens[i];
+        if (token !== undefined) invalidTokens.push(token);
+      }
+    });
+  } catch (err) {
+    // Total failure (e.g. network): no per-token info, don't remove tokens
+    throw err;
   }
+  return { invalidTokens };
 }
 
 export type FcmCallPayload = {
@@ -51,12 +61,12 @@ export type FcmCallPayload = {
 
 /**
  * Send data-only FCM messages to Android devices (incoming call).
- * Uses flat data keys; high priority for immediate delivery.
+ * Returns invalid tokens to remove from DB. Does not throw on partial failure.
  */
 export const sendFcmPush = async (
   tokens: string[],
   payload: FcmCallPayload
-): Promise<void> => {
+): Promise<{ invalidTokens: string[] }> => {
   const data: Record<string, string> = {
     type: payload.type,
     callId: payload.callId,
@@ -68,7 +78,7 @@ export const sendFcmPush = async (
   if (payload.backendUrl != null && payload.backendUrl !== "") {
     data.backendUrl = payload.backendUrl;
   }
-  await sendFcm(tokens, data);
+  return sendFcm(tokens, data);
 };
 
 export type FcmCallEndedPayload = {
@@ -78,16 +88,16 @@ export type FcmCallEndedPayload = {
 };
 
 /**
- * Send data-only FCM "call ended" (caller hung up).
+ * Send data-only FCM "call ended". Returns invalid tokens to remove from DB.
  */
 export const sendFcmCallEnded = async (
   tokens: string[],
   payload: { callId: string; address: string }
-): Promise<void> => {
+): Promise<{ invalidTokens: string[] }> => {
   const data: Record<string, string> = {
     type: "SIP_CALL_ENDED",
     callId: payload.callId,
     address: payload.address ?? "",
   };
-  await sendFcm(tokens, data);
+  return sendFcm(tokens, data);
 };

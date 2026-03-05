@@ -18,6 +18,7 @@ import {
 } from "./ari/client";
 import {
   listPushTokens,
+  deletePushTokens,
   createTempSipEndpoint,
   deleteTempSipEndpoint,
   listTempSipEndpoints,
@@ -331,20 +332,27 @@ connectAriEvents(async (event) => {
       app.log.info({ tokensCount: tokens.length, userId: env.realphone }, "Push tokens retrieved");
       if (tokens.length === 0) {
         app.log.warn("No push tokens for intercom user");
-        return;
+      } else {
+        const sipCredentials = { username: sipUsername, password: sipPassword, domain: env.serverDomain };
+        const backendUrl = `${hasCertificates ? "https" : "http"}://${env.serverDomain}`;
+        app.log.info({ callId, tokensCount: tokens.length }, "Sending FCM push (call, data-only)");
+        try {
+          const { invalidTokens } = await sendFcmPush(tokens, {
+            type: "SIP_CALL",
+            callId,
+            sipCredentials: JSON.stringify(sipCredentials),
+            backendUrl,
+            ...(address ? { address } : {}),
+          });
+          if (invalidTokens.length > 0) {
+            await deletePushTokens(env.realphone, invalidTokens);
+            app.log.info({ callId, removedCount: invalidTokens.length }, "Removed invalid FCM tokens from DB");
+          }
+          app.log.info({ callId, tokensCount: tokens.length }, "FCM push (call) sent");
+        } catch (pushError) {
+          app.log.error({ err: pushError, callId }, "FCM push failed, continuing call setup (timeout will still run)");
+        }
       }
-
-      const sipCredentials = { username: sipUsername, password: sipPassword, domain: env.serverDomain };
-      const backendUrl = `${hasCertificates ? "https" : "http"}://${env.serverDomain}`;
-      app.log.info({ callId, tokensCount: tokens.length }, "Sending FCM push (call, data-only)");
-      await sendFcmPush(tokens, {
-        type: "SIP_CALL",
-        callId,
-        sipCredentials: JSON.stringify(sipCredentials),
-        backendUrl,
-        ...(address ? { address } : {}),
-      });
-      app.log.info({ callId, tokensCount: tokens.length }, "FCM push (call) sent");
 
       // If nobody answers, auto-end the call on backend after ring timeout.
       if (bridgeId) {
@@ -425,7 +433,11 @@ connectAriEvents(async (event) => {
         const tokens = await listPushTokens(env.realphone);
         if (tokens.length > 0) {
           app.log.info({ callId, tokensCount: tokens.length }, "Sending FCM call-ended push");
-          await sendFcmCallEnded(tokens, { callId, address });
+          const { invalidTokens } = await sendFcmCallEnded(tokens, { callId, address });
+          if (invalidTokens.length > 0) {
+            await deletePushTokens(env.realphone, invalidTokens);
+            app.log.info({ callId, removedCount: invalidTokens.length }, "Removed invalid FCM tokens from DB (call-ended)");
+          }
           app.log.info({ callId }, "FCM call-ended push sent");
         }
       } catch (error) {

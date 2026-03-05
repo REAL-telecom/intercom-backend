@@ -152,6 +152,17 @@ export const listPushTokens = async (userId: string) => {
 };
 
 /**
+ * Remove push tokens that FCM reported as invalid (e.g. app uninstalled, token expired).
+ */
+export const deletePushTokens = async (userId: string, tokens: string[]) => {
+  if (tokens.length === 0) return;
+  await pool.query(
+    `DELETE FROM push_tokens WHERE user_id = $1 AND push_token = ANY($2::text[])`,
+    [userId, tokens]
+  );
+};
+
+/**
  * Create a temporary PJSIP endpoint in realtime tables.
  * This endpoint is removed after the call ends.
  */
