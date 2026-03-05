@@ -70,18 +70,6 @@ export const ensureSchema = async () => {
     );
   `);
   await pool.query(`
-    ALTER TABLE ps_endpoints
-    ADD COLUMN IF NOT EXISTS mailboxes TEXT;
-  `);
-  await pool.query(`
-    ALTER TABLE ps_endpoints
-    ADD COLUMN IF NOT EXISTS templates TEXT;
-  `);
-  await pool.query(`
-    ALTER TABLE ps_aors
-    ADD COLUMN IF NOT EXISTS contact TEXT;
-  `);
-  await pool.query(`
     CREATE TABLE IF NOT EXISTS push_tokens (
       id SERIAL PRIMARY KEY,
       user_id TEXT REFERENCES users(id),

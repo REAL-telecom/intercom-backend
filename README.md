@@ -14,7 +14,12 @@
    cd intercom-backend
    ```
 2. Создайте файл `.env` на основе `env.example` и заполните значения.
-3. Установите права на выполнение и запустите установку:
+3. Скопируйте файл ключа Firebase (`*-firebase-adminsdk-*.json`) в корень репозитория на сервере. Без него скрипт установки не запустится. С локального компьютера:
+   ```bash
+   scp ./*-firebase-adminsdk-*.json USER@SERVER:/путь/к/intercom-backend/
+   ```
+   (подставьте пользователя, хост сервера и путь к склонированному репо на сервере.)
+4. Установите права на выполнение и запустите установку:
    ```bash
    chmod +x deploy/install.sh
    sudo ./deploy/install.sh
@@ -24,7 +29,7 @@
    ```bash
    tail -f /opt/intercom-backend/install.log
    ```
-4. Backend будет установлен и запущен как systemd сервис `intercom-backend`.
+5. Backend будет установлен и запущен как systemd сервис `intercom-backend`.
    Проверить статус:
    ```bash
    systemctl status intercom-backend
@@ -72,19 +77,19 @@ TLS в `http.conf` отключен по умолчанию.
 
 ### Redis
 Используется для:
-- временных `callToken`
-- привязки `channelId -> endpointId`
+- данных звонка по `callId` (channelId, endpointId, credentials)
+- привязки `channelId` → session (callId, bridgeId, address)
+- сессий временных endpoint'ов и отложенного originate
 
 ## 6) Поток вызова (MVP)
 
 1. Домофон вызывает `Asterisk` → `Stasis(intercom)`
-2. Backend получает `StasisStart` и ставит канал на hold
-3. Создает временный SIP endpoint в Postgres (PJSIP realtime)
-4. Генерирует `callToken`, сохраняет креды в Redis
-5. Отправляет push через Expo
-6. Клиент запрашивает `/calls/credentials`
-7. Backend создает bridge и добавляет оба канала
-8. По `StasisEnd` временный endpoint удаляется
+2. Backend получает `StasisStart`, создаёт `callId`, временный SIP endpoint (PJSIP realtime)
+3. Сохраняет данные звонка в Redis по `callId`
+4. Отправляет push с `callId` и SIP credentials
+5. Backend создаёт bridge, добавляет канал домофона, ждёт регистрации клиента по endpoint
+6. Originate к клиенту, добавление в bridge, answer домофона
+7. По `StasisEnd` временный endpoint удаляется
 
 ## 7) env.example
 

@@ -19,6 +19,27 @@ function ensureFirebase() {
   initialized = true;
 }
 
+async function sendFcm(tokens: string[], data: Record<string, string>): Promise<void> {
+  if (tokens.length === 0) return;
+  ensureFirebase();
+  const results = await Promise.allSettled(
+    tokens.map((token) =>
+      admin.messaging().send({
+        token,
+        data,
+        android: { priority: "high" as const },
+      })
+    )
+  );
+  const failed = results.filter((r) => r.status === "rejected");
+  if (failed.length > 0) {
+    const first = (failed[0] as PromiseRejectedResult).reason;
+    throw new Error(
+      `FCM send failed for ${failed.length}/${tokens.length} tokens: ${first?.message ?? first}`
+    );
+  }
+}
+
 export type FcmCallPayload = {
   type: "SIP_CALL";
   callId: string;
@@ -36,9 +57,6 @@ export const sendFcmPush = async (
   tokens: string[],
   payload: FcmCallPayload
 ): Promise<void> => {
-  if (tokens.length === 0) return;
-  ensureFirebase();
-  const messaging = admin.messaging();
   const data: Record<string, string> = {
     type: payload.type,
     callId: payload.callId,
@@ -50,22 +68,7 @@ export const sendFcmPush = async (
   if (payload.backendUrl != null && payload.backendUrl !== "") {
     data.backendUrl = payload.backendUrl;
   }
-  const results = await Promise.allSettled(
-    tokens.map((token) =>
-      messaging.send({
-        token,
-        data,
-        android: { priority: "high" as const },
-      })
-    )
-  );
-  const failed = results.filter((r) => r.status === "rejected");
-  if (failed.length > 0) {
-    const first = (failed[0] as PromiseRejectedResult).reason;
-    throw new Error(
-      `FCM send failed for ${failed.length}/${tokens.length} tokens: ${first?.message ?? first}`
-    );
-  }
+  await sendFcm(tokens, data);
 };
 
 export type FcmCallEndedPayload = {
@@ -76,34 +79,15 @@ export type FcmCallEndedPayload = {
 
 /**
  * Send data-only FCM "call ended" (caller hung up).
- * Separate from sendFcmPush for easier maintenance.
  */
 export const sendFcmCallEnded = async (
   tokens: string[],
   payload: { callId: string; address: string }
 ): Promise<void> => {
-  if (tokens.length === 0) return;
-  ensureFirebase();
-  const messaging = admin.messaging();
   const data: Record<string, string> = {
     type: "SIP_CALL_ENDED",
     callId: payload.callId,
     address: payload.address ?? "",
   };
-  const results = await Promise.allSettled(
-    tokens.map((token) =>
-      messaging.send({
-        token,
-        data,
-        android: { priority: "high" as const },
-      })
-    )
-  );
-  const failed = results.filter((r) => r.status === "rejected");
-  if (failed.length > 0) {
-    const first = (failed[0] as PromiseRejectedResult).reason;
-    throw new Error(
-      `FCM call-ended send failed for ${failed.length}/${tokens.length} tokens: ${first?.message ?? first}`
-    );
-  }
+  await sendFcm(tokens, data);
 };

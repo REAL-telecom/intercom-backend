@@ -132,12 +132,11 @@ export const createBridge = async () => {
  * Add channel to existing bridge with explicit parameters.
  */
 export const addChannelToBridge = async (bridgeId: string, channelId: string) => {
-  return request(`/bridges/${bridgeId}/addChannel`, "POST", { 
+  return request(`/bridges/${bridgeId}/addChannel`, "POST", {
     channel: channelId,
-    // Явно указываем параметры для правильного соединения
     role: "participant",
     absorbDTMF: false,
-    mute: false
+    mute: false,
   });
 };
 
@@ -171,14 +170,6 @@ export const originateCall = async (endpoint: string, appArgs: string) => {
     endpoint,
     app: env.ariAppName,
     appArgs,
-    // Явно указываем параметры для правильного соединения
-    channelId: undefined, // Let Asterisk generate
-    callerId: undefined, // Use default
-    timeout: 30, // Timeout for originate
-    variables: {}, // No additional variables
-    originator: undefined, // No originator channel
-    otherChannelId: undefined, // No other channel
-    formats: undefined, // Use endpoint's allowed formats
   });
 };
 

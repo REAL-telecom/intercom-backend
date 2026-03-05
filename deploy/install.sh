@@ -203,8 +203,8 @@ ufw allow 443/tcp >> "${LOG_FILE}" 2>&1
 ufw allow 5060/udp >> "${LOG_FILE}" 2>&1
 ufw allow 8089/tcp >> "${LOG_FILE}" 2>&1
 ufw allow 10000:20000/udp >> "${LOG_FILE}" 2>&1
-ufw allow 3000/udp >> "${LOG_FILE}" 2>&1
-ufw allow 3000/tcp >> "${LOG_FILE}" 2>&1
+ufw allow ${SERVER_PORT:-3000}/udp >> "${LOG_FILE}" 2>&1
+ufw allow ${SERVER_PORT:-3000}/tcp >> "${LOG_FILE}" 2>&1
 ufw allow 3478/udp >> "${LOG_FILE}" 2>&1
 ufw allow 3478/tcp >> "${LOG_FILE}" 2>&1
 ufw allow 5349/udp >> "${LOG_FILE}" 2>&1
@@ -450,6 +450,22 @@ else
   cd - >/dev/null
 fi
 
+section "Запуск сервиса Asterisk"
+if skip_if_done systemctl is-active --quiet asterisk 2>/dev/null; then
+  :
+else
+cp "${CONFIG_DIR}/asterisk/asterisk.service" /etc/systemd/system/asterisk.service
+systemctl daemon-reload
+systemctl enable asterisk >> "${LOG_FILE}" 2>&1
+systemctl start asterisk >> "${LOG_FILE}" 2>&1
+if [[ -s /etc/systemd/system/asterisk.service ]] \
+  && systemctl is-active --quiet asterisk; then
+  ok "Asterisk запущен"
+else
+  warn "Asterisk не запущен. Смотри лог: ${LOG_FILE}"
+fi
+fi
+
 section "Настройка fail2ban"
 if skip_if_done test -s /etc/fail2ban/jail.local 2>/dev/null && systemctl is-active --quiet fail2ban 2>/dev/null; then
   :
@@ -470,22 +486,6 @@ else
   warn "fail2ban не настроен. Смотри лог: ${LOG_FILE}"
 fi
 fail2ban-client status >> "${LOG_FILE}" 2>&1 || true
-fi
-
-section "Запуск сервиса Asterisk"
-if skip_if_done systemctl is-active --quiet asterisk 2>/dev/null; then
-  :
-else
-cp "${CONFIG_DIR}/asterisk/asterisk.service" /etc/systemd/system/asterisk.service
-systemctl daemon-reload
-systemctl enable asterisk >> "${LOG_FILE}" 2>&1
-systemctl start asterisk >> "${LOG_FILE}" 2>&1
-if [[ -s /etc/systemd/system/asterisk.service ]] \
-  && systemctl is-active --quiet asterisk; then
-  ok "Asterisk запущен"
-else
-  warn "Asterisk не запущен. Смотри лог: ${LOG_FILE}"
-fi
 fi
 
 section "Установка Node.js (LTS 24.x)"
@@ -542,10 +542,10 @@ fi
 if [[ "${BACKEND_RUNNING}" -eq 1 ]]; then
   section "Проверка доступности сервера"
   if [[ -f "/etc/letsencrypt/live/${SERVER_DOMAIN}/fullchain.pem" ]] && [[ -f "/etc/letsencrypt/live/${SERVER_DOMAIN}/privkey.pem" ]]; then
-    health_url="https://127.0.0.1:${APP_PORT:-3000}/health"
+    health_url="https://127.0.0.1:${SERVER_PORT:-3000}/health"
     health_opts="-fsSk"
   else
-    health_url="http://127.0.0.1:${APP_PORT:-3000}/health"
+    health_url="http://127.0.0.1:${SERVER_PORT:-3000}/health"
     health_opts="-fsS"
   fi
   health_ok=0

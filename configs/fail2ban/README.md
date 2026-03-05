@@ -81,6 +81,20 @@ sudo fail2ban-client reload
 
 ### Работа с блокировками
 
+#### Как посмотреть список забаненных адресов
+
+```bash
+# Статус джейла SSH (количество банов и список IP)
+sudo fail2ban-client status sshd
+
+# Статус джейла Asterisk
+sudo fail2ban-client status asterisk
+```
+
+В выводе будут строки `Currently banned:` (число) и `Banned IP list:` (список адресов через пробел). Если забаненных нет, список будет пустым. «Total banned» — сколько всего раз банили за всё время; в «Banned IP list» только те IP, которые заблокированы в данный момент.
+
+#### Разблокировка
+
 ```bash
 # Разблокировать IP в SSH
 sudo fail2ban-client set sshd unbanip <IP>
