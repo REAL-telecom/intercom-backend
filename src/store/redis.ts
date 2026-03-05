@@ -8,22 +8,51 @@ const redis = new Redis({
 });
 
 /**
- * Store callToken payload with TTL.
- * Payload must include data needed to answer the call.
+ * Shape of data stored under call:${callId}.
+ * Incoming (domophone): channelId, endpointId, credentials, status.
+ * Outgoing (app-to-app): endpointId, credentials only.
  */
-export const setCallToken = async (callToken: string, payload: object, ttlSec: number) => {
-  const key = `call:${callToken}`;
+export interface CallData {
+  channelId?: string;
+  endpointId?: string;
+  credentials?: {
+    sipCredentials: {
+      username: string;
+      password: string;
+      domain: string;
+    };
+  };
+  /** For ring-timeout: only hang up if still 'pending'. Set to 'accepted' when answered, 'rejected' on /calls/end, 'timeout' when we hang up by timeout. */
+  status?: "pending" | "accepted" | "rejected" | "timeout";
+}
+
+/**
+ * Store call data by callId with TTL.
+ * Single entity for identifying a call; payload includes channelId, endpointId, credentials, etc.
+ */
+export const setCallData = async (callId: string, payload: object, ttlSec: number) => {
+  const key = `call:${callId}`;
   await redis.set(key, JSON.stringify(payload), "EX", ttlSec);
 };
 
 /**
- * Load callToken payload from Redis.
- * Returns null when token is missing or expired.
+ * Load call data by callId.
+ * Returns null when call is missing or expired.
  */
-export const getCallToken = async <T>(callToken: string) => {
-  const key = `call:${callToken}`;
+export const getCallData = async <T>(callId: string) => {
+  const key = `call:${callId}`;
   const value = await redis.get(key);
   return value ? (JSON.parse(value) as T) : null;
+};
+
+/**
+ * Derive callId from temporary endpoint id (tmp_<callId> or out_<callId>).
+ */
+export const getCallIdFromEndpointId = (endpointId: string): string | null => {
+  if (endpointId.startsWith("tmp_") || endpointId.startsWith("out_")) {
+    return endpointId.slice(4);
+  }
+  return null;
 };
 
 /**
@@ -48,7 +77,17 @@ export const getEndpointSession = async <T>(endpointId: string) => {
 };
 
 /**
- * Store per-channel session info (endpointId, callToken).
+ * Shape of data stored in channel session (StasisEnd cleanup, call-ended push).
+ */
+export interface ChannelSession {
+  bridgeId?: string;
+  endpointId?: string;
+  callId?: string;
+  address?: string;
+}
+
+/**
+ * Store per-channel session info (callId, endpointId, bridgeId, etc.).
  * Used for cleanup on StasisEnd.
  */
 export const setChannelSession = async (
