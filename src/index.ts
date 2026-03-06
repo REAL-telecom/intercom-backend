@@ -46,7 +46,7 @@ const config = {
   baseUrl: env.serverDomain,
 };
 
-// Проверяем наличие SSL сертификатов
+// Check for SSL certificates
 const certPath = `/etc/letsencrypt/live/${env.serverDomain}/fullchain.pem`;
 const keyPath = `/etc/letsencrypt/live/${env.serverDomain}/privkey.pem`;
 const hasCertificates = fs.existsSync(certPath) && fs.existsSync(keyPath);
@@ -185,10 +185,10 @@ connectAriEvents(async (event) => {
         try {
           app.log.info({ channelId, bridgeId }, "Processing outgoing channel - adding to bridge");
           
-          // Даем каналу время инициализироваться
+          // Give the channel time to initialize
           await new Promise((r) => setTimeout(r, 200));
           
-          // Добавляем канал в bridge
+          // Add the channel to the bridge
           await addChannelToBridge(bridgeId, channelId);
           app.log.info({ channelId, bridgeId }, "Outgoing channel successfully added to bridge");
           
@@ -199,17 +199,17 @@ connectAriEvents(async (event) => {
             env.callTokenTtlSec
           );
           
-          // Теперь нужно ответить на канал домофона
-          // Получаем информацию о bridge, чтобы найти канал домофона
+          // Now we need to answer the domophone channel
+          // Get bridge info to find the domophone channel
           try {
-            // Даем время каналу клиента полностью инициализироваться
+            // Give the client channel time to fully initialize
             await new Promise((r) => setTimeout(r, 300));
             
             const bridgeInfo = await getBridge(bridgeId);
             app.log.info({ bridgeId, channels: bridgeInfo.channels, currentChannel: channelId }, "Bridge info retrieved");
             
             if (bridgeInfo.channels && bridgeInfo.channels.length > 0) {
-              // Находим канал домофона (не текущий outgoing канал)
+              // Find the domophone channel (not the current outgoing channel)
               const domophoneChannelId = bridgeInfo.channels.find((ch: string) => ch !== channelId);
               if (domophoneChannelId) {
                 app.log.info({ domophoneChannelId, bridgeId, allChannels: bridgeInfo.channels }, "Found domophone channel in bridge, answering it");
@@ -245,7 +245,7 @@ connectAriEvents(async (event) => {
           }
         } catch (error) {
           app.log.error({ err: error, channelId, bridgeId }, "CRITICAL: Failed to add outgoing channel to bridge - call will not connect");
-          // Пытаемся еще раз через небольшую задержку
+          // Retry after a short delay
           try {
             await new Promise((r) => setTimeout(r, 500));
             await addChannelToBridge(bridgeId, channelId);
@@ -261,8 +261,8 @@ connectAriEvents(async (event) => {
     }
 
     try {
-      // НЕ отвечаем сразу - ответим после того, как клиентский канал ответит
-      // Это нужно для правильной установки соединения
+      // Do not answer immediately - we will answer after the client channel answers
+      // This is needed for proper connection setup
       app.log.info({ channelId }, "Incoming domophone channel received, will answer after client connects");
 
       // PJSIP channel name is like "PJSIP/endpoint_id-<uniq>"; extract endpoint_id for address lookup
@@ -460,7 +460,7 @@ app.get("/health", async () => {
 
 /**
  * Cleanup temporary endpoints from PostgreSQL if Redis TTL expired.
- * Redis очищает данные автоматически по TTL, здесь только очищаем PostgreSQL.
+ * Redis cleans up data automatically by TTL; here we only clean up PostgreSQL.
  */
 const cleanupStaleEndpoints = async () => {
   try {
