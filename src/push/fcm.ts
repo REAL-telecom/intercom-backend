@@ -44,7 +44,8 @@ async function sendFcm(
       }
     });
   } catch (err) {
-    // Total failure (e.g. network): no per-token info, don't remove tokens
+    // Total failure (e.g. network): sendEachForMulticast threw before returning
+    // per-token responses, so we have no invalidTokens to report — rethrow.
     throw err;
   }
   return { invalidTokens };
@@ -55,8 +56,6 @@ export type FcmCallPayload = {
   callId: string;
   sipCredentials: string;
   address?: string;
-  /** Backend base URL for API calls (e.g. reject/end call). */
-  backendUrl?: string;
 };
 
 /**
@@ -75,9 +74,6 @@ export const sendFcmPush = async (
   if (payload.address != null && payload.address !== "") {
     data.address = payload.address;
   }
-  if (payload.backendUrl != null && payload.backendUrl !== "") {
-    data.backendUrl = payload.backendUrl;
-  }
   return sendFcm(tokens, data);
 };
 
@@ -85,19 +81,22 @@ export type FcmCallEndedPayload = {
   type: "SIP_CALL_ENDED";
   callId: string;
   address: string;
+  reason: "timeout" | "caller_hungup";
 };
 
 /**
  * Send data-only FCM "call ended". Returns invalid tokens to remove from DB.
+ * reason is sent so the app can log it (only used when not rejected).
  */
 export const sendFcmCallEnded = async (
   tokens: string[],
-  payload: { callId: string; address: string }
+  payload: FcmCallEndedPayload
 ): Promise<{ invalidTokens: string[] }> => {
   const data: Record<string, string> = {
     type: "SIP_CALL_ENDED",
     callId: payload.callId,
     address: payload.address ?? "",
+    reason: payload.reason,
   };
   return sendFcm(tokens, data);
 };

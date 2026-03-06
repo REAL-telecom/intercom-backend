@@ -334,14 +334,12 @@ connectAriEvents(async (event) => {
         app.log.warn("No push tokens for intercom user");
       } else {
         const sipCredentials = { username: sipUsername, password: sipPassword, domain: env.serverDomain };
-        const backendUrl = `${hasCertificates ? "https" : "http"}://${env.serverDomain}`;
         app.log.info({ callId, tokensCount: tokens.length }, "Sending FCM push (call, data-only)");
         try {
           const { invalidTokens } = await sendFcmPush(tokens, {
             type: "SIP_CALL",
             callId,
             sipCredentials: JSON.stringify(sipCredentials),
-            backendUrl,
             ...(address ? { address } : {}),
           });
           if (invalidTokens.length > 0) {
@@ -425,23 +423,30 @@ connectAriEvents(async (event) => {
       app.log.debug({ channelId }, "No bridgeId in channel session, skipping bridge cleanup");
     }
 
-    // If this is the domophone channel (caller hung up), notify the app with SIP_CALL_ENDED
+    // If this is the domophone channel, notify the app with SIP_CALL_ENDED (unless user rejected)
     const callId = channelSession?.callId ?? getCallIdFromEndpointId(channelSession?.endpointId ?? "");
     if (callId) {
-      const address = channelSession?.address ?? "";
-      try {
-        const tokens = await listPushTokens(env.realphone);
-        if (tokens.length > 0) {
-          app.log.info({ callId, tokensCount: tokens.length }, "Sending FCM call-ended push");
-          const { invalidTokens } = await sendFcmCallEnded(tokens, { callId, address });
-          if (invalidTokens.length > 0) {
-            await deletePushTokens(env.realphone, invalidTokens);
-            app.log.info({ callId, removedCount: invalidTokens.length }, "Removed invalid FCM tokens from DB (call-ended)");
+      const callData = await getCallData<CallData>(callId);
+      if (callData?.status === "rejected") {
+        app.log.debug({ callId }, "StasisEnd: skip FCM call-ended (user rejected)");
+      } else {
+        const address = channelSession?.address ?? "";
+        const reason: "timeout" | "caller_hungup" =
+          callData?.status === "timeout" ? "timeout" : "caller_hungup";
+        try {
+          const tokens = await listPushTokens(env.realphone);
+          if (tokens.length > 0) {
+            app.log.info({ callId, reason, tokensCount: tokens.length }, "Sending FCM call-ended push");
+            const { invalidTokens } = await sendFcmCallEnded(tokens, { type: "SIP_CALL_ENDED", callId, address, reason });
+            if (invalidTokens.length > 0) {
+              await deletePushTokens(env.realphone, invalidTokens);
+              app.log.info({ callId, removedCount: invalidTokens.length }, "Removed invalid FCM tokens from DB (call-ended)");
+            }
+            app.log.info({ callId }, "FCM call-ended push sent");
           }
-          app.log.info({ callId }, "FCM call-ended push sent");
+        } catch (error) {
+          app.log.warn({ err: error, callId }, "Failed to send FCM call-ended push");
         }
-      } catch (error) {
-        app.log.warn({ err: error, callId }, "Failed to send FCM call-ended push");
       }
     }
     
