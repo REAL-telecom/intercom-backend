@@ -280,6 +280,12 @@ connectAriEvents(async (event) => {
             { panelId: domophoneEndpointId, existingCallId, channelId },
             "Ignoring duplicate incoming from same panel"
           );
+          try {
+            await hangupChannel(channelId);
+            app.log.debug({ channelId }, "Hung up duplicate channel so it does not hang in Stasis");
+          } catch (err) {
+            app.log.warn({ err, channelId }, "Failed to hang up duplicate channel");
+          }
           return;
         }
       }
