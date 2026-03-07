@@ -15,6 +15,7 @@ import {
   originateCall,
   getBridge,
   deleteBridge,
+  continueInDialplan,
 } from "./ari/client";
 import {
   listPushTokens,
@@ -387,16 +388,27 @@ connectAriEvents(async (event) => {
               return;
             }
 
-            app.log.warn({ callId, channelId, bridgeId: capturedBridgeId, ringTimeoutSec: env.ringTimeoutSec }, "Incoming call timed out - hanging up domophone channel");
+            app.log.warn({ callId, channelId, bridgeId: capturedBridgeId, ringTimeoutSec: env.ringTimeoutSec }, "Incoming call timed out - sending domophone to noanswer");
             await setCallData(callId, { ...callData, status: "timeout" }, env.callTokenTtlSec);
 
             try {
-              await hangupChannel(channelId);
-              app.log.info({ channelId, callId }, "Timed out: domophone channel hung up");
-            } catch (hangupError) {
-              app.log.warn({ err: hangupError, channelId }, "Failed to hangup timed out channel");
+              await continueInDialplan(channelId, "from-domophone", "noanswer", 1);
+              app.log.info({ channelId, callId }, "Timed out: domophone channel sent to noanswer");
+            } catch (continueError) {
+              app.log.warn({ err: continueError, channelId }, "Failed to continueInDialplan timed out channel");
             }
             try {
+              const bridgeInfo = await getBridge(capturedBridgeId);
+              if (bridgeInfo?.channels?.length) {
+                for (const chId of bridgeInfo.channels) {
+                  if (chId === channelId) continue;
+                  try {
+                    await hangupChannel(chId);
+                  } catch (err) {
+                    app.log.debug({ err, chId }, "Timed out: hangupChannel failed (channel may already be down)");
+                  }
+                }
+              }
               await deleteBridge(capturedBridgeId);
               app.log.info({ bridgeId: capturedBridgeId }, "Timed out: bridge deleted");
             } catch (error) {

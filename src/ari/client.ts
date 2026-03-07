@@ -153,6 +153,24 @@ export const hangupChannel = async (channelId: string) => {
 };
 
 /**
+ * Exit Stasis; continue channel in dialplan at given context/extension/priority.
+ * Channel leaves the bridge automatically.
+ */
+export const continueInDialplan = async (
+  channelId: string,
+  context: string,
+  extension: string,
+  priority: number
+): Promise<void> => {
+  const params = new URLSearchParams({
+    context,
+    extension,
+    priority: String(priority),
+  });
+  await request(`/channels/${channelId}/continue?${params.toString()}`, "POST");
+};
+
+/**
  * Originate outgoing call to endpoint with explicit parameters.
  * appArgs may include metadata (e.g. bridge id).
  */

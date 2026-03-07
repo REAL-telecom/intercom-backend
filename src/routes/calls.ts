@@ -3,7 +3,7 @@ import crypto from "crypto";
 import { env } from "../config/env";
 import { setCallData, setEndpointSession, getCallData, clearActiveIncomingFromPanel } from "../store/redis";
 import { createTempSipEndpoint } from "../store/postgres";
-import { hangupChannel, deleteBridge } from "../ari/client";
+import { hangupChannel, deleteBridge, continueInDialplan, getBridge } from "../ari/client";
 
 import type { CallData, CredentialsPayload } from "../types";
 
@@ -60,12 +60,23 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
     const channelId = callData.channelId;
     await setCallData(callId, { ...callData, status: "rejected" }, env.callTokenTtlSec);
     try {
-      await hangupChannel(channelId);
+      await continueInDialplan(channelId, "from-domophone", "busy", 1);
     } catch (err) {
-      request.log.warn({ err, channelId, callId }, "hangupChannel failed (channel may already be down)");
+      request.log.warn({ err, channelId, callId }, "continueInDialplan failed (channel may already be down)");
     }
     if (callData.bridgeId) {
       try {
+        const bridgeInfo = await getBridge(callData.bridgeId);
+        if (bridgeInfo?.channels?.length) {
+          for (const chId of bridgeInfo.channels) {
+            if (chId === channelId) continue;
+            try {
+              await hangupChannel(chId);
+            } catch (err) {
+              request.log.debug({ err, chId }, "hangupChannel failed (channel may already be down)");
+            }
+          }
+        }
         await deleteBridge(callData.bridgeId);
       } catch (err) {
         request.log.debug({ err, bridgeId: callData.bridgeId }, "deleteBridge failed (bridge may already be gone)");
