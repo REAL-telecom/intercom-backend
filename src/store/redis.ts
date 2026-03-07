@@ -9,7 +9,7 @@ const redis = new Redis({
 
 /**
  * Shape of data stored under call:${callId}.
- * Incoming (domophone): channelId, endpointId, credentials, status.
+ * Incoming (domophone): channelId, endpointId, credentials, status, bridgeId, address.
  * Outgoing (app-to-app): endpointId, credentials only.
  */
 export interface CallData {
@@ -24,6 +24,12 @@ export interface CallData {
   };
   /** For ring-timeout: only hang up if still 'pending'. Set to 'accepted' when answered, 'rejected' on /calls/end, 'timeout' when we hang up by timeout. */
   status?: "pending" | "accepted" | "rejected" | "timeout";
+  /** Incoming only: bridge id for cleanup. */
+  bridgeId?: string;
+  /** Incoming only: display address (e.g. panel address). */
+  address?: string;
+  /** Incoming only: panel (domophone) endpoint id for "one active incoming per panel" cleanup. */
+  domophoneEndpointId?: string;
 }
 
 /**
@@ -77,13 +83,13 @@ export const getEndpointSession = async <T>(endpointId: string) => {
 };
 
 /**
- * Shape of data stored in channel session (StasisEnd cleanup, call-ended push).
+ * Shape of data stored in channel session (StasisEnd cleanup).
+ * Domophone channel: only { callId } (full call data in call:${callId}).
+ * Client channel (outgoing leg): only { bridgeId }.
  */
 export interface ChannelSession {
   bridgeId?: string;
-  endpointId?: string;
   callId?: string;
-  address?: string;
 }
 
 /**
@@ -135,6 +141,30 @@ export const getPendingOriginate = async <T>(endpointId: string) => {
  */
 export const deletePendingOriginate = async (endpointId: string) => {
   const key = `originate:${endpointId}`;
+  await redis.del(key);
+};
+
+/**
+ * Active incoming call from a panel (domophone). Key: incoming_panel:${panelId} -> callId.
+ * Used to ignore duplicate StasisStart from the same panel.
+ */
+export const setActiveIncomingFromPanel = async (
+  panelId: string,
+  callId: string,
+  ttlSec: number
+) => {
+  const key = `incoming_panel:${panelId}`;
+  await redis.set(key, callId, "EX", ttlSec);
+};
+
+export const getActiveIncomingFromPanel = async (panelId: string): Promise<string | null> => {
+  const key = `incoming_panel:${panelId}`;
+  const value = await redis.get(key);
+  return value;
+};
+
+export const clearActiveIncomingFromPanel = async (panelId: string) => {
+  const key = `incoming_panel:${panelId}`;
   await redis.del(key);
 };
 

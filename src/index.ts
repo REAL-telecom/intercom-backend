@@ -35,6 +35,9 @@ import {
   getPendingOriginate,
   deletePendingOriginate,
   getChannelSession,
+  getActiveIncomingFromPanel,
+  setActiveIncomingFromPanel,
+  clearActiveIncomingFromPanel,
 } from "./store/redis";
 import { sendFcmPush, sendFcmCallEnded } from "./push/fcm";
 import crypto from "crypto";
@@ -270,6 +273,17 @@ connectAriEvents(async (event) => {
       const domophoneEndpointId = namePart ? namePart.split("-")[0] : null;
       const address = domophoneEndpointId ? await getAddressByEndpointId(domophoneEndpointId) : null;
 
+      if (domophoneEndpointId) {
+        const existingCallId = await getActiveIncomingFromPanel(domophoneEndpointId);
+        if (existingCallId) {
+          app.log.info(
+            { panelId: domophoneEndpointId, existingCallId, channelId },
+            "Ignoring duplicate incoming from same panel"
+          );
+          return;
+        }
+      }
+
       const callId = crypto.randomUUID();
       const endpointId = `tmp_${callId}`;
       const sipUsername = endpointId;
@@ -284,25 +298,7 @@ connectAriEvents(async (event) => {
         templateId: "tpl_client",
       });
       app.log.info({ endpointId }, "Temporary SIP endpoint created");
-
-      await setCallData(
-        callId,
-        {
-          channelId,
-          endpointId,
-          status: "pending",
-          credentials: {
-            sipCredentials: {
-              username: sipUsername,
-              password: sipPassword,
-              domain: env.serverDomain,
-            },
-          },
-        },
-        env.callTokenTtlSec
-      );
-      app.log.info({ callId, channelId, endpointId, ttlSec: env.callTokenTtlSec }, "Call data stored");
-      await setEndpointSession(endpointId, { type: "call" }, env.callTokenTtlSec);
+      await setEndpointSession(endpointId, { type: "incoming" }, env.callTokenTtlSec);
 
       // Bridge and originate: same logic as previously in GET /calls/credentials
       let bridgeId: string | undefined;
@@ -314,14 +310,33 @@ connectAriEvents(async (event) => {
         await new Promise((r) => setTimeout(r, 300));
         await addChannelToBridge(bridge.id, channelId);
         app.log.info({ bridgeId: bridge.id, channelId }, "STEP 3: Incoming domophone channel added to bridge");
-        
-        // Store callId, bridgeId, address in channel session for cleanup and call-ended push
-        await setChannelSession(
-          channelId,
-          { callId, endpointId, bridgeId: bridge.id, address: address ?? "" },
+
+        // Single root key: full call data in call:${callId}, channel session only points to callId
+        await setCallData(
+          callId,
+          {
+            channelId,
+            endpointId,
+            status: "pending",
+            bridgeId: bridge.id,
+            address: address ?? "",
+            ...(domophoneEndpointId ? { domophoneEndpointId } : {}),
+            credentials: {
+              sipCredentials: {
+                username: sipUsername,
+                password: sipPassword,
+                domain: env.serverDomain,
+              },
+            },
+          },
           env.callTokenTtlSec
         );
-        
+        app.log.info({ callId, channelId, endpointId, ttlSec: env.callTokenTtlSec }, "Call data stored");
+        await setChannelSession(channelId, { callId }, env.callTokenTtlSec);
+        if (domophoneEndpointId) {
+          await setActiveIncomingFromPanel(domophoneEndpointId, callId, env.callTokenTtlSec);
+        }
+
         await setPendingOriginate(endpointId, { bridgeId: bridge.id, channelId }, env.ringTimeoutSec);
         app.log.info({ endpointId, bridgeId: bridge.id }, "STEP 4: Pending originate stored, waiting for endpoint registration.");
       } catch (error) {
@@ -379,6 +394,9 @@ connectAriEvents(async (event) => {
             } catch (error) {
               app.log.debug({ err: error, bridgeId: capturedBridgeId }, "Bridge already deleted or delete failed");
             }
+            if (callData.domophoneEndpointId) {
+              await clearActiveIncomingFromPanel(callData.domophoneEndpointId);
+            }
           } catch (error) {
             app.log.warn({ err: error, callId }, "Failed to auto-end timed out call");
           }
@@ -397,12 +415,15 @@ connectAriEvents(async (event) => {
     const channelId = channel.id;
     
     app.log.info({ channelId }, "StasisEnd - channel terminated, cleaning up bridge");
-    
+
     const channelSession = await getChannelSession<ChannelSession>(channelId);
-    if (channelSession?.bridgeId) {
-      const bridgeId = channelSession.bridgeId;
+    let callData: CallData | null = null;
+    if (channelSession?.callId) {
+      callData = await getCallData<CallData>(channelSession.callId);
+    }
+    const bridgeId = callData?.bridgeId ?? channelSession?.bridgeId;
+    if (bridgeId) {
       try {
-        // Hang up all remaining channels in the bridge (Asterisk does not hang up when bridge is deleted)
         const bridgeInfo = await getBridge(bridgeId);
         if (bridgeInfo?.channels?.length) {
           for (const chId of bridgeInfo.channels) {
@@ -420,19 +441,17 @@ connectAriEvents(async (event) => {
         app.log.debug({ err: error, bridgeId, channelId }, "StasisEnd: bridge already deleted or cleanup failed");
       }
     } else {
-      app.log.debug({ channelId }, "No bridgeId in channel session, skipping bridge cleanup");
+      app.log.debug({ channelId }, "No bridgeId in channel session or call data, skipping bridge cleanup");
     }
 
-    // If this is the domophone channel, notify the app with SIP_CALL_ENDED (unless user rejected)
-    const callId = channelSession?.callId ?? getCallIdFromEndpointId(channelSession?.endpointId ?? "");
-    if (callId) {
-      const callData = await getCallData<CallData>(callId);
-      if (callData?.status === "rejected") {
+    const callId = channelSession?.callId;
+    if (callId && callData) {
+      if (callData.status === "rejected") {
         app.log.debug({ callId }, "StasisEnd: skip FCM call-ended (user rejected)");
       } else {
-        const address = channelSession?.address ?? "";
+        const address = callData.address ?? "";
         const reason: "timeout" | "caller_hungup" =
-          callData?.status === "timeout" ? "timeout" : "caller_hungup";
+          callData.status === "timeout" ? "timeout" : "caller_hungup";
         try {
           const tokens = await listPushTokens(env.realphone);
           if (tokens.length > 0) {
@@ -448,8 +467,11 @@ connectAriEvents(async (event) => {
           app.log.warn({ err: error, callId }, "Failed to send FCM call-ended push");
         }
       }
+      if (callData.domophoneEndpointId) {
+        await clearActiveIncomingFromPanel(callData.domophoneEndpointId);
+      }
     }
-    
+
     // Redis will cleanup session data automatically by TTL
   }
 });
@@ -466,7 +488,7 @@ const cleanupStaleEndpoints = async () => {
   try {
     const endpointIds = await listTempSipEndpoints();
     for (const endpointId of endpointIds) {
-      const session = await getEndpointSession<{ type: "call" | "outgoing" }>(endpointId);
+      const session = await getEndpointSession<{ type: "incoming" | "outgoing" }>(endpointId);
       if (!session) {
         try {
           await deleteTempSipEndpoint(endpointId);
