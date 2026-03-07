@@ -111,15 +111,16 @@ export const deletePendingOriginate = async (endpointId: string) => {
 
 /**
  * Active incoming call from a panel (domophone). Key: incoming_panel:${panelId} -> callId.
- * Used to ignore duplicate StasisStart from the same panel.
+ * Sets only if key does not exist (atomic "claim"). Returns true if we claimed the panel, false if another call already has it.
  */
 export const setActiveIncomingFromPanel = async (
   panelId: string,
   callId: string,
   ttlSec: number
-) => {
+): Promise<boolean> => {
   const key = `incoming_panel:${panelId}`;
-  await redis.set(key, callId, "EX", ttlSec);
+  const result = await redis.set(key, callId, "EX", ttlSec, "NX");
+  return result === "OK";
 };
 
 export const getActiveIncomingFromPanel = async (panelId: string): Promise<string | null> => {

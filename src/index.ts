@@ -273,9 +273,16 @@ connectAriEvents(async (event) => {
       const domophoneEndpointId = namePart ? namePart.split("-")[0] : null;
       const address = domophoneEndpointId ? await getAddressByEndpointId(domophoneEndpointId) : null;
 
+      const callId = crypto.randomUUID();
+
       if (domophoneEndpointId) {
-        const existingCallId = await getActiveIncomingFromPanel(domophoneEndpointId);
-        if (existingCallId) {
+        const claimed = await setActiveIncomingFromPanel(
+          domophoneEndpointId,
+          callId,
+          env.callTokenTtlSec
+        );
+        if (!claimed) {
+          const existingCallId = await getActiveIncomingFromPanel(domophoneEndpointId);
           app.log.info(
             { panelId: domophoneEndpointId, existingCallId, channelId },
             "Ignoring duplicate incoming from same panel"
@@ -289,8 +296,6 @@ connectAriEvents(async (event) => {
           return;
         }
       }
-
-      const callId = crypto.randomUUID();
       const endpointId = `tmp_${callId}`;
       const sipUsername = endpointId;
       const sipPassword = crypto.randomBytes(8).toString("hex");
@@ -339,9 +344,6 @@ connectAriEvents(async (event) => {
         );
         app.log.info({ callId, channelId, endpointId, ttlSec: env.callTokenTtlSec }, "Call data stored");
         await setChannelSession(channelId, { callId }, env.callTokenTtlSec);
-        if (domophoneEndpointId) {
-          await setActiveIncomingFromPanel(domophoneEndpointId, callId, env.callTokenTtlSec);
-        }
 
         await setPendingOriginate(endpointId, { bridgeId: bridge.id, channelId }, env.ringTimeoutSec);
         app.log.info({ endpointId, bridgeId: bridge.id }, "STEP 4: Pending originate stored, waiting for endpoint registration.");
@@ -456,8 +458,8 @@ connectAriEvents(async (event) => {
         app.log.debug({ callId }, "StasisEnd: skip FCM call-ended (user rejected)");
       } else {
         const address = callData.address ?? "";
-        const reason: "timeout" | "caller_hungup" =
-          callData.status === "timeout" ? "timeout" : "caller_hungup";
+        const reason: "timeout" | "caller_hung_up" =
+          callData.status === "timeout" ? "timeout" : "caller_hung_up";
         try {
           const tokens = await listPushTokens(env.realphone);
           if (tokens.length > 0) {

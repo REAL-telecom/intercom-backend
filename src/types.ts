@@ -66,7 +66,7 @@ export type FcmCallEndedPayload = {
   type: "SIP_CALL_ENDED";
   callId: string;
   address: string;
-  reason: "timeout" | "caller_hungup";
+  reason: "timeout" | "caller_hung_up";
 };
 
 /** ARI WebSocket event shape. */
