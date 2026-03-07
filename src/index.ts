@@ -468,6 +468,8 @@ connectAriEvents(async (event) => {
     if (callId && callData) {
       if (callData.status === "rejected") {
         app.log.debug({ callId }, "StasisEnd: skip FCM call-ended (user rejected)");
+      } else if (callData.status === "accepted") {
+        app.log.debug({ callId }, "StasisEnd: skip FCM call-ended (call was accepted, end via SIP only)");
       } else {
         const address = callData.address ?? "";
         const reason: "timeout" | "caller_hung_up" =
