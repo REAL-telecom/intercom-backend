@@ -8,31 +8,6 @@ const redis = new Redis({
 });
 
 /**
- * Shape of data stored under call:${callId}.
- * Incoming (domophone): channelId, endpointId, credentials, status, bridgeId, address.
- * Outgoing (app-to-app): endpointId, credentials only.
- */
-export interface CallData {
-  channelId?: string;
-  endpointId?: string;
-  credentials?: {
-    sipCredentials: {
-      username: string;
-      password: string;
-      domain: string;
-    };
-  };
-  /** For ring-timeout: only hang up if still 'pending'. Set to 'accepted' when answered, 'rejected' on /calls/end, 'timeout' when we hang up by timeout. */
-  status?: "pending" | "accepted" | "rejected" | "timeout";
-  /** Incoming only: bridge id for cleanup. */
-  bridgeId?: string;
-  /** Incoming only: display address (e.g. panel address). */
-  address?: string;
-  /** Incoming only: panel (domophone) endpoint id for "one active incoming per panel" cleanup. */
-  domophoneEndpointId?: string;
-}
-
-/**
  * Store call data by callId with TTL.
  * Single entity for identifying a call; payload includes channelId, endpointId, credentials, etc.
  */
@@ -81,16 +56,6 @@ export const getEndpointSession = async <T>(endpointId: string) => {
   const value = await redis.get(key);
   return value ? (JSON.parse(value) as T) : null;
 };
-
-/**
- * Shape of data stored in channel session (StasisEnd cleanup).
- * Domophone channel: only { callId } (full call data in call:${callId}).
- * Client channel (outgoing leg): only { bridgeId }.
- */
-export interface ChannelSession {
-  bridgeId?: string;
-  callId?: string;
-}
 
 /**
  * Store per-channel session info (callId, endpointId, bridgeId, etc.).

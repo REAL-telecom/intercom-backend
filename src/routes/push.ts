@@ -1,12 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { savePushToken } from "../store/postgres";
 
-type RegisterBody = {
-  userId: string;
-  pushToken: string;
-  platform: string;
-  deviceId?: string;
-};
+import type { RegisterBody } from "../types";
 
 /**
  * Push registration endpoint.

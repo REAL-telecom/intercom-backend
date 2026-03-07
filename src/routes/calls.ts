@@ -5,18 +5,7 @@ import { setCallData, setEndpointSession, getCallData, clearActiveIncomingFromPa
 import { createTempSipEndpoint } from "../store/postgres";
 import { hangupChannel, deleteBridge } from "../ari/client";
 
-import type { CallData } from "../store/redis";
-
-type CredentialsPayload = {
-  endpointId: string;
-  credentials: {
-    sipCredentials: {
-      username: string;
-      password: string;
-      domain: string;
-    };
-  };
-};
+import type { CallData, CredentialsPayload } from "../types";
 
 /**
  * Provide temporary SIP credentials for outgoing calls (client-to-client).

@@ -1,16 +1,7 @@
 import WebSocket, { RawData } from "ws";
 import { env } from "../config/env";
 
-type AriEvent = {
-  type: string;
-  [key: string]: unknown;
-};
-
-type AriEventHandler = (event: AriEvent) => void;
-
-type AriBridge = {
-  id: string;
-};
+import type { AriEvent, AriEventHandler, AriBridge } from "../types";
 
 /**
  * Build ARI REST base URL (no credentials in URL).

@@ -2,6 +2,8 @@ import * as fs from "fs";
 import * as admin from "firebase-admin";
 import { env } from "../config/env";
 
+import type { FcmCallPayload, FcmCallEndedPayload } from "../types";
+
 let initialized = false;
 
 function ensureFirebase() {
@@ -51,13 +53,6 @@ async function sendFcm(
   return { invalidTokens };
 }
 
-export type FcmCallPayload = {
-  type: "SIP_CALL";
-  callId: string;
-  sipCredentials: string;
-  address?: string;
-};
-
 /**
  * Send data-only FCM messages to Android devices (incoming call).
  * Returns invalid tokens to remove from DB. Does not throw on partial failure.
@@ -75,13 +70,6 @@ export const sendFcmPush = async (
     data.address = payload.address;
   }
   return sendFcm(tokens, data);
-};
-
-export type FcmCallEndedPayload = {
-  type: "SIP_CALL_ENDED";
-  callId: string;
-  address: string;
-  reason: "timeout" | "caller_hungup";
 };
 
 /**

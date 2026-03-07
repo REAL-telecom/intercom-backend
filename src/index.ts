@@ -42,7 +42,7 @@ import {
 import { sendFcmPush, sendFcmCallEnded } from "./push/fcm";
 import crypto from "crypto";
 
-import type { ChannelSession, CallData } from "./store/redis";
+import type { ChannelSession, CallData } from "./types";
 
 const config = {
   appPort: env.appPort,
@@ -282,7 +282,7 @@ connectAriEvents(async (event) => {
           );
           try {
             await hangupChannel(channelId);
-            app.log.debug({ channelId }, "Hung up duplicate channel so it does not hang in Stasis");
+            app.log.info({ channelId }, "Hung up duplicate channel so it does not hang in Stasis");
           } catch (err) {
             app.log.warn({ err, channelId }, "Failed to hang up duplicate channel");
           }
