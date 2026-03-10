@@ -553,13 +553,30 @@ const checkPendingOriginate = async () => {
       );
       if (pending) {
         try {
+          app.log.info(
+            { endpointId, bridgeId: pending.bridgeId, time: Date.now() },
+            "ATTEMPTING to originate call to endpoint"
+          );
           const appArgs = `outgoing,${pending.bridgeId}`;
           await originateCall(`PJSIP/${endpointId}`, appArgs);
           await deletePendingOriginate(endpointId);
-          app.log.info({ endpointId, bridgeId: pending.bridgeId }, "Originated call from periodic check");
+          app.log.info(
+            { endpointId, bridgeId: pending.bridgeId, time: Date.now() },
+            "SUCCESS: Originated call from periodic check"
+          );
         } catch (error) {
-          // Endpoint might not be registered yet, will retry on next check
-          app.log.debug({ err: error, endpointId }, "Failed to originate from periodic check, will retry");
+          const err = error as Error & { code?: string };
+          app.log.warn(
+            {
+              err: error,
+              endpointId,
+              bridgeId: pending.bridgeId,
+              time: Date.now(),
+              errorMessage: err?.message,
+              errorCode: err?.code,
+            },
+            "FAILED: Could not originate call"
+          );
         }
       }
     }
