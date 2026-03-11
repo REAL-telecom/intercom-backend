@@ -66,7 +66,8 @@ export const ensureSchema = async () => {
       direct_media TEXT,
       force_rport TEXT,
       rewrite_contact TEXT,
-      rtp_symmetric TEXT
+      rtp_symmetric TEXT,
+      ice_support TEXT
     );
   `);
   await pool.query(`
@@ -194,12 +195,12 @@ export const createTempSipEndpoint = async (params: {
     `
     INSERT INTO ps_endpoints (
       id, transport, aors, auth, context, templates, disallow, allow,
-      direct_media, force_rport, rewrite_contact, rtp_symmetric
+      direct_media, force_rport, rewrite_contact, rtp_symmetric, ice_support
     ) VALUES (
       $1, 'transport-udp', $1, $1, $2, $3, 'all', 'ulaw,alaw,h264',
-      'no', 'yes', 'yes', 'yes'
+      'no', 'yes', 'yes', 'yes', 'yes'
     )
-    ON CONFLICT (id) DO UPDATE SET context = EXCLUDED.context, templates = EXCLUDED.templates, allow = EXCLUDED.allow;
+    ON CONFLICT (id) DO UPDATE SET context = EXCLUDED.context, templates = EXCLUDED.templates, allow = EXCLUDED.allow, ice_support = EXCLUDED.ice_support;
     `,
     [id, context, templateId]
   );
