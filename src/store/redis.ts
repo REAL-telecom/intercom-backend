@@ -27,10 +27,12 @@ export const getCallData = async <T>(callId: string) => {
 };
 
 /**
- * Derive callId from temporary endpoint id (tmp_<callId> or out_<callId>).
+ * Derive callId from temporary endpoint id (inc_<callId> or out_<callId>).
  */
 export const getCallIdFromEndpointId = (endpointId: string): string | null => {
-  if (endpointId.startsWith("tmp_") || endpointId.startsWith("out_")) {
+  // Endpoint names are crafted by us; ARI adds a suffix after "-" for the channel name.
+  // At this point we expect endpointId itself without that suffix.
+  if (endpointId.startsWith("inc_") || endpointId.startsWith("out_")) {
     return endpointId.slice(4);
   }
   return null;

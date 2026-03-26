@@ -220,7 +220,7 @@ export const deleteTempSipEndpoint = async (id: string) => {
  */
 export const listTempSipEndpoints = async () => {
   const result = await pool.query(
-    `SELECT id FROM ps_endpoints WHERE id LIKE 'tmp_%' OR id LIKE 'out_%'`
+    `SELECT id FROM ps_endpoints WHERE id LIKE 'inc_%' OR id LIKE 'out_%'`
   );
   return result.rows.map((row: { id: string }) => row.id);
 };

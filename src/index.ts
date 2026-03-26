@@ -128,7 +128,7 @@ connectAriEvents(async (event) => {
       
       const endpoint = ep as { technology?: string; resource?: string; state?: string; channel_ids?: string[]; [key: string]: any };
       
-      if (endpoint.technology === "PJSIP" && endpoint.resource?.startsWith("tmp_")) {
+      if (endpoint.technology === "PJSIP" && endpoint.resource?.startsWith("inc_")) {
         const endpointId = endpoint.resource;
         const state = endpoint.state ?? null;
 
@@ -223,9 +223,10 @@ connectAriEvents(async (event) => {
                   const namePart = channel.name?.split("/")[1];
                   let endpointIdFromChannel: string | null = namePart ?? null;
                   if (namePart) {
+                    // ARI/Asterisk appends "-<tail>" after our crafted endpoint id in channel.name.
+                    // We strip everything after the last "-" and treat the rest as endpoint id.
                     const lastHyphen = namePart.lastIndexOf("-");
-                    const suffix = lastHyphen >= 0 ? namePart.slice(lastHyphen + 1) : "";
-                    if (suffix.length === 8 && /^\d{8}$/.test(suffix)) endpointIdFromChannel = namePart.slice(0, lastHyphen);
+                    if (lastHyphen > 0) endpointIdFromChannel = namePart.slice(0, lastHyphen);
                   }
                   const callIdForStatus = endpointIdFromChannel ? getCallIdFromEndpointId(endpointIdFromChannel) : null;
                   if (callIdForStatus) {
@@ -297,7 +298,7 @@ connectAriEvents(async (event) => {
           return;
         }
       }
-      const endpointId = `tmp_${callId}`;
+      const endpointId = `inc_${callId}`;
       const sipUsername = endpointId;
       const sipPassword = crypto.randomBytes(8).toString("hex");
 
