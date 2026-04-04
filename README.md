@@ -60,10 +60,10 @@ TLS в `http.conf` отключен по умолчанию.
 
 ## 4) PJSIP Realtime
 
-Используется динамическое создание временных endpoint’ов через Postgres.
-Для этого в Asterisk включены:
-- `res_config_pgsql`
-- `sorcery.conf` + `extconfig.conf`
+Используется динамическое создание временных endpoint’ов через Postgres (`res_config_pgsql`).
+
+- В `configs/asterisk/extconfig.conf` заданы семейства `ps_endpoints`, `ps_auths`, `ps_aors`, `ps_registrations` → `pgsql,asterisk`.
+- В `configs/asterisk/sorcery.conf` объекты привязаны к realtime так: в **`[res_pjsip]`** — `endpoint`, `auth`, `aor`; объект **`registration`** задаётся в отдельной секции **`[res_pjsip_outbound_registration]`** (не помещать `registration` под `[res_pjsip]` — в Asterisk 22 это приводит к падению при старте, см. [Asterisk #1651](https://github.com/asterisk/asterisk/issues/1651)).
 
 Таблицы для realtime создаются при старте backend (`ensureSchema`).
 
@@ -73,7 +73,12 @@ TLS в `http.conf` отключен по умолчанию.
 Используется для:
 - `push_tokens` (сохранение Expo токенов)
 - `users` и `calls` (минимальная модель)
-- `ps_aors`, `ps_auths`, `ps_endpoints` (PJSIP realtime)
+- `ps_aors`, `ps_auths`, `ps_endpoints`, `ps_registrations` (PJSIP realtime)
+
+Инструкции по ручному заполнению realtime:
+
+- [Добавление домофона](deploy/ADD_DOMOPHONE.md)
+- [МультиФон / OTP](deploy/ADD_MULTIFON.md)
 
 ### Redis
 Используется для:

@@ -321,6 +321,16 @@ else
   warn "Ошибка копирования файлов конфигурации Asterisk. Смотри лог: ${LOG_FILE}"
 fi
 
+section "Копирование звуков Asterisk (OTP и др.)"
+if [[ -d "${CONFIG_DIR}/asterisk/sounds/ru/custom/otp" ]]; then
+  mkdir -p /var/lib/asterisk/sounds/ru/custom/otp
+  cp -a "${CONFIG_DIR}/asterisk/sounds/ru/custom/otp/." /var/lib/asterisk/sounds/ru/custom/otp/
+  chown -R asterisk:asterisk /var/lib/asterisk/sounds/ru/custom/otp
+  ok "Звуки скопированы в /var/lib/asterisk/sounds/ru/custom/otp"
+else
+  warn "Каталог звуков ${CONFIG_DIR}/asterisk/sounds/ru/custom/otp не найден — пропуск"
+fi
+
 section "Установка утилиты управления Asterisk-логов"
 if skip_if_done test -x /usr/local/bin/asterisk-full-logs-on 2>/dev/null; then
   :

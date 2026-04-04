@@ -70,6 +70,38 @@ export const ensureSchema = async () => {
       ice_support TEXT
     );
   `);
+  await pool.query(`ALTER TABLE ps_auths ADD COLUMN IF NOT EXISTS realm TEXT;`);
+  await pool.query(
+    `ALTER TABLE ps_endpoints ADD COLUMN IF NOT EXISTS outbound_auth TEXT;`
+  );
+  await pool.query(
+    `ALTER TABLE ps_endpoints ADD COLUMN IF NOT EXISTS from_user TEXT;`
+  );
+  await pool.query(
+    `ALTER TABLE ps_endpoints ADD COLUMN IF NOT EXISTS from_domain TEXT;`
+  );
+  await pool.query(
+    `ALTER TABLE ps_endpoints ADD COLUMN IF NOT EXISTS callerid TEXT;`
+  );
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ps_registrations (
+      id TEXT PRIMARY KEY,
+      auth_rejection_permanent TEXT,
+      client_uri TEXT,
+      contact_user TEXT,
+      expiration INTEGER,
+      fatal_retry_interval INTEGER,
+      forbidden_retry_interval INTEGER,
+      max_retries INTEGER,
+      outbound_auth TEXT,
+      outbound_proxy TEXT,
+      retry_interval INTEGER,
+      server_uri TEXT,
+      transport TEXT,
+      support_path TEXT,
+      support_outbound_authentication TEXT
+    );
+  `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS push_tokens (
       id SERIAL PRIMARY KEY,
