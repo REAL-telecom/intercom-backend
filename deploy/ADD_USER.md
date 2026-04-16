@@ -3,6 +3,8 @@
 Эта инструкция **не создаёт** пользователя.  
 Пользователь уже должен существовать после OTP-верификации (`/auth/verify-code`).
 
+Параметры задаются в **`.env`**, секция **TEST USER** в [`.env.example`](../.env.example).
+
 ### 1) Проверить, что пользователь есть
 
 ```bash
@@ -41,6 +43,9 @@ WHERE phone = '${TEST_USER_PHONE}';
 ### 3) Проверить результат
 
 ```bash
+cd /opt/intercom-backend
+set -a && source .env && set +a
+
 docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
 SELECT id, phone, address_id, apartment, created_at, updated_at, last_verified_at
 FROM users

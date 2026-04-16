@@ -1,9 +1,11 @@
 ## E2E тест блокировок (клиент + API/Redis + fail2ban)
 
+Документ для **ручной** проверки: в первую очередь **прикладные rate limits** по частоте запросов к `/auth/request-code` и `/auth/verify-code` (счётчики Redis, ответы **429**, поля **`blockExpiresAt`** / **`nextRequestAvailableAt`**), затем при необходимости — срабатывание fail2ban по логам (`auth-requests`, `auth-verify`, `auth-combined`).
+
 Цель: подтвердить, что блокировки срабатывают на всех уровнях:
 - клиентский UX-лок по `blockExpiresAt` (429) и `nextRequestAvailableAt` (200 request-code);
 - прикладные лимиты backend (Redis);
-- сетевой бан через fail2ban backend jail.
+- сетевой бан через fail2ban (jail `auth-*`, см. [configs/fail2ban/README.md](../configs/fail2ban/README.md)).
 
 Перед тестом убедитесь, что backend запущен и `/health` отвечает.
 

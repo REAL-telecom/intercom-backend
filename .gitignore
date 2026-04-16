@@ -3,6 +3,8 @@
 .idea/
 
 node_modules/
+
+# Сборка TypeScript (`npm run build`) — не коммитить
 dist/
 
 npm-debug.log

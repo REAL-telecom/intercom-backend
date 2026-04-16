@@ -1,5 +1,7 @@
 ## МультиФон Бизнес (исходящие звонки / OTP)
 
+Учётные данные **`MULTIFON_PHONE`** и **`MULTIFON_PASSWORD`** задаются в **`.env`** (см. [`.env.example`](../.env.example), секция **MULTIFON**).
+
 Регистрация SIP и учётные данные транка хранятся в таблицах PostgreSQL `ps_*` (realtime PJSIP). Звуки OTP лежат в репозитории в `configs/asterisk/sounds/ru/custom/otp/` и при установке копируются в `/var/lib/asterisk/sounds/ru/custom/otp/` (см. `deploy/install.sh`).
 
 Убедитесь, что в `/etc/asterisk` уже развёрнуты из репозитория:
@@ -18,8 +20,6 @@
 cd /opt/intercom-backend
 set -a && source .env && set +a
 ```
-
-Дальше в командах используются `$POSTGRES_USER` и `$POSTGRES_DB`.
 
 ### 2) Заполнение Multifon (номер и пароль берутся из `$MULTIFON_PHONE` / `$MULTIFON_PASSWORD`)
 

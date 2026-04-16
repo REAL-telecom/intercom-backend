@@ -75,10 +75,15 @@ TLS в `http.conf` отключен по умолчанию.
 - `users` и `calls` (минимальная модель)
 - `ps_aors`, `ps_auths`, `ps_endpoints`, `ps_registrations` (PJSIP realtime)
 
-Инструкции по ручному заполнению realtime:
+Сценарии после установки (рекомендуемый порядок и ссылки): [deploy/README.md](deploy/README.md).
 
-- [Добавление домофона](deploy/ADD_DOMOPHONE.md)
+Отдельные шаги:
+
 - [МультиФон / OTP](deploy/ADD_MULTIFON.md)
+- [Адрес в БД](deploy/ADD_ADDRESS.md)
+- [IP панели](deploy/GET_DOMOPHONE_IP.md)
+- [Домофон в PJSIP](deploy/ADD_DOMOPHONE.md)
+- [Привязка пользователя к адресу](deploy/ADD_USER.md)
 
 ### Redis
 Используется для:

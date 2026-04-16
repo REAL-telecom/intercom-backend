@@ -4,15 +4,7 @@
 
 ### 1) Добавить адрес
 
-В `.env` задайте переменные тестового адреса (без персональных данных):
-
-```dotenv
-TEST_ADDRESS_STREET=Testovaya
-TEST_ADDRESS_HOUSE=1
-TEST_ADDRESS_BUILDING=
-TEST_ADDRESS_LETTER=
-TEST_ADDRESS_STRUCTURE=
-```
+В `.env` задайте переменные секции **TEST ADDRESS** (см. [`.env.example`](../.env.example)) — без персональных данных, только тестовые значения.
 
 ```bash
 cd /opt/intercom-backend
@@ -44,4 +36,4 @@ LIMIT 10;
 "
 ```
 
-Сохраните `id` нужной записи — он нужен для привязки панели в `ADD_DOMOPHONE.md` и пользователя к адресу.
+Сохраните `id` нужной записи — подставьте его в **`TEST_PANEL_ADDRESS_ID`** и при необходимости в **`TEST_USER_ADDRESS_ID`** в `.env` (см. [`.env.example`](../.env.example)).
