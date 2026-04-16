@@ -17,6 +17,9 @@ const buildWsUrl = () => {
   return `ws://${env.ariHost}:${env.ariPort}/ari/events?app=${env.ariAppName}`;
 };
 
+/**
+ * Build HTTP Basic Authorization header for ARI requests.
+ */
 const buildAuthHeader = () => {
   const token = Buffer.from(`${env.ariUser}:${env.ariPassword}`).toString("base64");
   return `Basic ${token}`;
@@ -47,7 +50,7 @@ export const connectAriEvents = (onEvent: AriEventHandler) => {
         const event = JSON.parse(data.toString()) as AriEvent;
         onEvent(event);
       } catch {
-        // ignore invalid payloads
+        console.warn("⚠️ ARI message ignored: invalid payload");
       }
     });
 
@@ -96,6 +99,7 @@ const request = async <T = unknown>(path: string, method = "GET", body?: unknown
     return undefined as T;
   }
 
+  // Some successful ARI responses may have an empty body.
   const text = await res.text();
   if (!text) {
     return undefined as T;
@@ -179,6 +183,25 @@ export const originateCall = async (endpoint: string, appArgs: string) => {
     endpoint,
     app: env.ariAppName,
     appArgs,
+  });
+};
+
+/**
+ * Originate into dialplan (not Stasis). Channel variables are available in dialplan as ${VAR}.
+ */
+export const originateToDialplan = async (params: {
+  endpoint: string;
+  context: string;
+  extension: string;
+  priority: number;
+  variables: Record<string, string>;
+}) => {
+  return request("/channels", "POST", {
+    endpoint: params.endpoint,
+    context: params.context,
+    extension: params.extension,
+    priority: params.priority,
+    variables: params.variables,
   });
 };
 

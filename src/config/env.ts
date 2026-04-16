@@ -17,6 +17,7 @@ const parsePort = (value: string, defaultPort: number) => {
 
 export const env = {
   appPort: parsePort(process.env.SERVER_PORT ?? "3000", 3000),
+  logLevel: process.env.LOG_LEVEL ?? "info",
   serverDomain: requireEnv("SERVER_DOMAIN"),
   serverIp: requireEnv("SERVER_IP"),
   ariHost: process.env.ARI_HOST ?? "127.0.0.1",
@@ -36,6 +37,5 @@ export const env = {
     user: requireEnv("POSTGRES_USER"),
     password: requireEnv("POSTGRES_PASSWORD"),
   },
-  realphone: requireEnv("REALPHONE"),
   firebaseServiceAccountPath: process.env.FIREBASE_SERVICE_ACCOUNT_PATH || "",
 };

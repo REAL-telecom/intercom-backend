@@ -13,21 +13,45 @@ const pool = new Pool({
  * Ensure core schema for users, calls, push tokens and PJSIP realtime tables.
  * Runs once at startup to make server self-contained.
  */
-export const ensureSchema = async () => {
+export const createDatabaseSchema = async () => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS addresses (
+      id BIGSERIAL PRIMARY KEY,
+      street TEXT NOT NULL,
+      house TEXT NOT NULL,
+      building TEXT,
+      letter TEXT,
+      structure TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS panels (
+      id BIGSERIAL PRIMARY KEY,
+      ip INET UNIQUE NOT NULL,
+      address_id BIGINT NOT NULL REFERENCES addresses(id),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
+      id SERIAL PRIMARY KEY,
       phone TEXT UNIQUE,
       is_active BOOLEAN DEFAULT FALSE,
       paid_until DATE,
-      created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW()
+      address_id BIGINT REFERENCES addresses(id),
+      apartment TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      last_verified_at TIMESTAMPTZ
     );
   `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS calls (
       id SERIAL PRIMARY KEY,
-      user_id TEXT REFERENCES users(id),
+      user_id INTEGER REFERENCES users(id),
       call_id TEXT NOT NULL,
       status TEXT NOT NULL,
       started_at TIMESTAMP DEFAULT NOW(),
@@ -49,7 +73,8 @@ export const ensureSchema = async () => {
       id TEXT PRIMARY KEY,
       auth_type TEXT,
       username TEXT,
-      password TEXT
+      password TEXT,
+      realm TEXT
     );
   `);
   await pool.query(`
@@ -67,22 +92,13 @@ export const ensureSchema = async () => {
       force_rport TEXT,
       rewrite_contact TEXT,
       rtp_symmetric TEXT,
-      ice_support TEXT
+      ice_support TEXT,
+      outbound_auth TEXT,
+      from_user TEXT,
+      from_domain TEXT,
+      callerid TEXT
     );
   `);
-  await pool.query(`ALTER TABLE ps_auths ADD COLUMN IF NOT EXISTS realm TEXT;`);
-  await pool.query(
-    `ALTER TABLE ps_endpoints ADD COLUMN IF NOT EXISTS outbound_auth TEXT;`
-  );
-  await pool.query(
-    `ALTER TABLE ps_endpoints ADD COLUMN IF NOT EXISTS from_user TEXT;`
-  );
-  await pool.query(
-    `ALTER TABLE ps_endpoints ADD COLUMN IF NOT EXISTS from_domain TEXT;`
-  );
-  await pool.query(
-    `ALTER TABLE ps_endpoints ADD COLUMN IF NOT EXISTS callerid TEXT;`
-  );
   await pool.query(`
     CREATE TABLE IF NOT EXISTS ps_registrations (
       id TEXT PRIMARY KEY,
@@ -105,22 +121,13 @@ export const ensureSchema = async () => {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS push_tokens (
       id SERIAL PRIMARY KEY,
-      user_id TEXT REFERENCES users(id),
+      user_id INTEGER REFERENCES users(id),
       push_token TEXT NOT NULL,
       platform TEXT NOT NULL,
       device_id TEXT,
       created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW()
-    );
-  `);
-  await pool.query(`
-    CREATE UNIQUE INDEX IF NOT EXISTS push_tokens_unique
-    ON push_tokens (user_id, push_token);
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS endpoint_addresses (
-      endpoint_id TEXT PRIMARY KEY,
-      address TEXT NOT NULL
+      updated_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE (user_id, push_token)
     );
   `);
 };
@@ -129,7 +136,7 @@ export const ensureSchema = async () => {
  * Save (or update) push token (FCM) for a user.
  */
 export const savePushToken = async (params: {
-  userId: string;
+  userId: number;
   pushToken: string;
   platform: string;
   deviceId?: string;
@@ -146,37 +153,114 @@ export const savePushToken = async (params: {
   );
 };
 
-/**
- * Ensure user record exists (TEXT id).
- * Used for MVP single-user setup.
- */
-export const ensureUser = async (userId: string) => {
-  await pool.query(
-    `
-    INSERT INTO users (id)
-    VALUES ($1)
-    ON CONFLICT (id) DO NOTHING;
-    `,
-    [userId]
-  );
+export type AddressRecord = {
+  id: number;
+  street: string;
+  house: string;
+  building: string | null;
+  letter: string | null;
+  structure: string | null;
 };
 
 /**
- * Get display address for a PJSIP endpoint (e.g. doorphone). Used for FCM push subtitle.
+ * Create an address row and return stored canonical fields.
+ * Optional parts are persisted as NULL when omitted.
  */
-export const getAddressByEndpointId = async (endpointId: string): Promise<string | null> => {
-  const result = await pool.query(
-    `SELECT address FROM endpoint_addresses WHERE endpoint_id = $1`,
-    [endpointId]
+export const addAddress = async (params: {
+  street: string;
+  house: string;
+  building?: string;
+  letter?: string;
+  structure?: string;
+}): Promise<AddressRecord> => {
+  const { street, house, building, letter, structure } = params;
+  const result = await pool.query<AddressRecord>(
+    `
+    INSERT INTO addresses (street, house, building, letter, structure, created_at, updated_at)
+    VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+    RETURNING id, street, house, building, letter, structure
+    `,
+    [street, house, building ?? null, letter ?? null, structure ?? null]
   );
-  const row = result.rows[0] as { address: string } | undefined;
-  return row?.address ?? null;
+  const row = result.rows[0];
+  if (!row) throw new Error("Failed to create address");
+  return row;
+};
+
+export type PanelRecord = {
+  id: number;
+  ip: string;
+  address_id: number;
+};
+
+/**
+ * Create panel mapping (IP -> address) and return inserted row.
+ * IP is stored as inet and returned as text.
+ */
+export const addPanel = async (params: {
+  ip: string;
+  addressId: number;
+}): Promise<PanelRecord> => {
+  const { ip, addressId } = params;
+  const result = await pool.query<PanelRecord>(
+    `
+    INSERT INTO panels (ip, address_id, created_at, updated_at)
+    VALUES ($1::inet, $2, NOW(), NOW())
+    RETURNING id, ip::text AS ip, address_id
+    `,
+    [ip, addressId]
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error("Failed to create panel");
+  return row;
+};
+
+/**
+ * Find panel by IP address.
+ * Returns null when no panel exists for this IP.
+ */
+export const getPanel = async (ip: string): Promise<PanelRecord | null> => {
+  const result = await pool.query<PanelRecord>(
+    `
+    SELECT id, ip::text AS ip, address_id
+    FROM panels
+    WHERE ip = $1::inet
+    LIMIT 1
+    `,
+    [ip]
+  );
+  return result.rows[0] ?? null;
+};
+
+export type UserByAddressApartment = {
+  id: number;
+  phone: string;
+};
+
+/**
+ * Lookup user by address and apartment pair.
+ * Returns null when no matching user is found.
+ */
+export const getUser = async (
+  addressId: number,
+  apartment: string
+): Promise<UserByAddressApartment | null> => {
+  const result = await pool.query<UserByAddressApartment>(
+    `
+    SELECT id, phone
+    FROM users
+    WHERE address_id = $1 AND apartment = $2
+    LIMIT 1
+    `,
+    [addressId, apartment]
+  );
+  return result.rows[0] ?? null;
 };
 
 /**
  * Load all push tokens for a user.
  */
-export const listPushTokens = async (userId: string) => {
+export const getPushTokens = async (userId: number | string) => {
   const result = await pool.query(
     `SELECT push_token FROM push_tokens WHERE user_id = $1`,
     [userId]
@@ -187,7 +271,7 @@ export const listPushTokens = async (userId: string) => {
 /**
  * Remove push tokens that FCM reported as invalid (e.g. app uninstalled, token expired).
  */
-export const deletePushTokens = async (userId: string, tokens: string[]) => {
+export const deletePushTokens = async (userId: number | string, tokens: string[]) => {
   if (tokens.length === 0) return;
   await pool.query(
     `DELETE FROM push_tokens WHERE user_id = $1 AND push_token = ANY($2::text[])`,
@@ -250,7 +334,7 @@ export const deleteTempSipEndpoint = async (id: string) => {
 /**
  * List temporary SIP endpoints by prefix.
  */
-export const listTempSipEndpoints = async () => {
+export const getTempSipEndpoints = async () => {
   const result = await pool.query(
     `SELECT id FROM ps_endpoints WHERE id LIKE 'inc_%' OR id LIKE 'out_%'`
   );
@@ -260,7 +344,7 @@ export const listTempSipEndpoints = async () => {
 /**
  * Ensure default PJSIP endpoint templates exist.
  */
-export const ensurePjsipTemplates = async () => {
+export const sipEndpointTemplates = async () => {
   await pool.query(
     `
     INSERT INTO ps_endpoints (
@@ -281,6 +365,61 @@ export const ensurePjsipTemplates = async () => {
     ON CONFLICT (id) DO UPDATE SET allow = EXCLUDED.allow;
     `
   );
+};
+
+/**
+ * New user row after successful phone verification (other columns default).
+ */
+export type User = {
+  id: number;
+  phone: string;
+  pushToken: string | null;
+};
+
+/**
+ * Ensure user exists for verified phone and return app auth payload.
+ * Reuses existing user if phone was already verified earlier.
+ */
+export const getOrCreateUser = async (
+  phone: string
+): Promise<User> => {
+  const existing = await pool.query<{ id: number; phone: string }>(
+    `SELECT id, phone FROM users WHERE phone = $1 LIMIT 1`,
+    [phone]
+  );
+
+  const row = existing.rows[0];
+  if (row) {
+    const push = await pool.query<{ push_token: string }>(
+      `
+      SELECT push_token
+      FROM push_tokens
+      WHERE user_id = $1
+      ORDER BY updated_at DESC
+      LIMIT 1
+      `,
+      [row.id]
+    );
+    return {
+      id: row.id,
+      phone: row.phone,
+      pushToken: push.rows[0]?.push_token ?? null,
+    };
+  }
+
+  const inserted = await pool.query<{ id: number; phone: string }>(
+    `INSERT INTO users (phone) VALUES ($1) RETURNING id, phone`,
+    [phone]
+  );
+  const created = inserted.rows[0];
+  if (!created) {
+    throw new Error("Failed to create user by phone");
+  }
+  return {
+    id: created.id,
+    phone: created.phone,
+    pushToken: null,
+  };
 };
 
 export const db = pool;

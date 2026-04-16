@@ -6,6 +6,9 @@
 export type CallData = {
   channelId?: string;
   endpointId?: string;
+  userId?: number;
+  apartment?: string;
+  panelIp?: string;
   credentials?: {
     sipCredentials: {
       username: string;
@@ -47,7 +50,7 @@ export type CredentialsPayload = {
 
 /** Body for POST /push/register. */
 export type RegisterBody = {
-  userId: string;
+  userId: number;
   pushToken: string;
   platform: string;
   deviceId?: string;

@@ -1,15 +1,22 @@
 import { FastifyInstance } from "fastify";
 import crypto from "crypto";
 import { env } from "../config/env";
-import { setCallData, setEndpointSession, getCallData, clearActiveIncomingFromPanel } from "../store/redis";
+import {
+  setCallData,
+  setEndpointSession,
+  getCallData,
+  clearActiveIncomingFromPanel,
+  deletePendingOriginate,
+} from "../store/redis";
 import { createTempSipEndpoint } from "../store/postgres";
 import { hangupChannel, deleteBridge, continueInDialplan, getBridge } from "../ari/client";
 
 import type { CallData, CredentialsPayload } from "../types";
 
 /**
- * Provide temporary SIP credentials for outgoing calls (client-to-client).
- * Uses callId as single entity; creates temp endpoint out_<callId>.
+ * Register call routes:
+ * - issue temporary SIP credentials for outgoing client calls (`/calls/credentials`)
+ * - terminate active incoming call flow and cleanup bridge/channels (`/calls/end`)
  */
 export const registerCallRoutes = async (app: FastifyInstance) => {
   app.post("/calls/credentials", async () => {
@@ -59,6 +66,20 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
     }
     const channelId = callData.channelId;
     await setCallData(callId, { ...callData, status: "rejected" }, env.callTokenTtlSec);
+    if (callData.endpointId) {
+      try {
+        await deletePendingOriginate(callData.endpointId);
+        request.log.info(
+          { callId, endpointId: callData.endpointId },
+          "calls/end: cleared pending originate"
+        );
+      } catch (err) {
+        request.log.warn(
+          { err, callId, endpointId: callData.endpointId },
+          "calls/end: failed to clear pending originate"
+        );
+      }
+    }
     try {
       await continueInDialplan(channelId, "from-domophone", "busy", 1);
     } catch (err) {

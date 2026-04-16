@@ -13,7 +13,7 @@
    git clone https://github.com/REAL-telecom/intercom-backend
    cd intercom-backend
    ```
-2. Создайте файл `.env` на основе `env.example` и заполните значения.
+2. Создайте файл `.env` на основе `.env.example` и заполните значения.
 3. Скопируйте файл ключа Firebase (`*-firebase-adminsdk-*.json`) в корень репозитория на сервере. Без него скрипт установки не запустится. С локального компьютера:
    ```bash
    scp ./*-firebase-adminsdk-*.json USER@SERVER:/путь/к/intercom-backend/
@@ -96,7 +96,34 @@ TLS в `http.conf` отключен по умолчанию.
 6. Originate к клиенту, добавление в bridge, answer домофона
 7. По `StasisEnd` временный endpoint удаляется
 
-## 7) env.example
+## 7) API (актуальный контракт)
+
+### `POST /auth/request-code`
+Тело: `{ "phone": "+7..." }`
+
+- `200`: `{"success":true,"message":"...","nextRequestAvailableAt":<unix>}` — unix-секунда, раньше которой не следует снова вызывать запрос кода (кулдаун интерфейса ~60 с); срок жизни OTP в ответе не передаётся.
+- `400`: `{"success":false,"message":"..."}`
+- `429`: `{"success":false,"message":"...","blockExpiresAt":<unix>}` + `Retry-After`
+- `502`: `{"success":false,"message":"Не удалось совершить звонок."}`
+
+Назначение: сгенерировать OTP, поставить задачу звонка в очередь, запустить worker.  
+Контекст Asterisk для проигрывания цифр: `otp-out` в `extensions.conf`.
+
+### `POST /auth/verify-code`
+Тело: `{ "phone": "+7...", "code": "12345" }`
+
+- `200`: `{"success":true,"message":"Пин подтверждён.","user":{...}}`
+- `400`: `{"success":false,"message":"..."}`
+- `410`: `{"success":false,"message":"Срок кода истек."}`
+- `429`: `{"success":false,"message":"...","blockExpiresAt":<unix>}` + `Retry-After`
+
+### `POST /calls/end`
+Тело: `{ "callId": "..." }`
+
+- `204` при успешном завершении
+- побочный эффект: call помечается как `rejected`, pending-originate для endpoint очищается
+
+## 8) `.env` / `.env.example`
 
 В `.env` обязательно заполнить:
 - `SERVER_DOMAIN`, `SERVER_IP`
@@ -104,10 +131,11 @@ TLS в `http.conf` отключен по умолчанию.
 - `REDIS_PASSWORD`
 - `TURN_USER`, `TURN_PASSWORD`
 - `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
-- `REALPHONE` (идентификатор квартиры для MVP, например 1)
+- `FIREBASE_SERVICE_ACCOUNT_PATH` (путь к JSON ключу Firebase)
+- `LOG_LEVEL` (опционально, по умолчанию `info`; допустимые: `debug|info|warn|error`)
 - `EXPO_ACCESS_TOKEN` (опционально, см. [инструкцию](instructions/GET_EXPO_TOKEN.md))
 
-## 8) Важно
+## 9) Важно
 
 Этот MVP рассчитан на один домофон и одного пользователя.  
 Дальше планируется:

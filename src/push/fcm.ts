@@ -6,6 +6,9 @@ import type { FcmCallPayload, FcmCallEndedPayload } from "../types";
 
 let initialized = false;
 
+/**
+ * Lazily initialize Firebase Admin SDK for FCM sending.
+ */
 function ensureFirebase() {
   if (initialized) return;
   const path = env.firebaseServiceAccountPath;

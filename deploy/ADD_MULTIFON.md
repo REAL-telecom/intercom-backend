@@ -21,14 +21,14 @@ set -a && source .env && set +a
 
 Дальше в командах используются `$POSTGRES_USER` и `$POSTGRES_DB`.
 
-### 2) Заполнение Multifon (замените пароль и при необходимости номер)
+### 2) Заполнение Multifon (номер и пароль берутся из `$MULTIFON_PHONE` / `$MULTIFON_PASSWORD`)
 
 **Auth** — `realm = BREDBAND` совпадает с `Proxy-Authenticate` у SBC; при отказе digest попробуйте `UPDATE ps_auths SET realm = NULL WHERE id = 'multifon-auth';`.
 
 ```bash
 docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
 INSERT INTO ps_auths (id, auth_type, username, password, realm)
-VALUES ('multifon-auth', 'userpass', 'ВАШ_НОМЕР_ТЕЛЕФОНА', 'ВАШ_ПАРОЛЬ', 'BREDBAND')
+VALUES ('multifon-auth', 'userpass', '${MULTIFON_PHONE}', '${MULTIFON_PASSWORD}', 'BREDBAND')
 ON CONFLICT (id) DO UPDATE SET
   auth_type = EXCLUDED.auth_type,
   username = EXCLUDED.username,
@@ -69,9 +69,9 @@ INSERT INTO ps_endpoints (
   'yes',
   'yes',
   'yes',
-  '79616532393',
+  '${MULTIFON_PHONE}',
   'multifon.ru',
-  '79616532393'
+  '${MULTIFON_PHONE}'
 )
 ON CONFLICT (id) DO UPDATE SET
   transport = EXCLUDED.transport,
@@ -102,7 +102,7 @@ VALUES (
   'transport-udp',
   'multifon-auth',
   'sip:sbc.megafon.ru:5060',
-  'sip:79616532393@multifon.ru',
+  'sip:${MULTIFON_PHONE}@multifon.ru',
   180,
   60
 )

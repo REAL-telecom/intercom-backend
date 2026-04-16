@@ -7,28 +7,34 @@
 ### 1) Добавить записи через docker compose (на сервере)
 ```bash
 cd /opt/intercom-backend
-docker compose exec -T postgres psql -U postgres -d intercom -c "INSERT INTO ps_aors (id, max_contacts) VALUES ('domophone', 1) ON CONFLICT (id) DO UPDATE SET max_contacts = 1;"
-docker compose exec -T postgres psql -U postgres -d intercom -c "INSERT INTO ps_auths (id, auth_type, username, password) VALUES ('domophone', 'userpass', 'domophone', 'password123') ON CONFLICT (id) DO UPDATE SET username = EXCLUDED.username, password = EXCLUDED.password;"
-docker compose exec -T postgres psql -U postgres -d intercom -c "INSERT INTO ps_endpoints (id, transport, aors, auth, context, templates, disallow, allow, direct_media, force_rport, rewrite_contact, rtp_symmetric) VALUES ('domophone','transport-udp','domophone','domophone','from-domophone','tpl_domophone','all','ulaw,alaw,h264','no','yes','yes','yes') ON CONFLICT (id) DO UPDATE SET context = EXCLUDED.context, templates = EXCLUDED.templates, allow = EXCLUDED.allow;"
+set -a && source .env && set +a
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "INSERT INTO ps_aors (id, max_contacts) VALUES ('domophone', 1) ON CONFLICT (id) DO UPDATE SET max_contacts = 1;"
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "INSERT INTO ps_auths (id, auth_type, username, password) VALUES ('domophone', 'userpass', 'domophone', 'password123') ON CONFLICT (id) DO UPDATE SET username = EXCLUDED.username, password = EXCLUDED.password;"
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "INSERT INTO ps_endpoints (id, transport, aors, auth, context, templates, disallow, allow, direct_media, force_rport, rewrite_contact, rtp_symmetric) VALUES ('domophone','transport-udp','domophone','domophone','from-domophone','tpl_domophone','all','ulaw,alaw,h264','no','yes','yes','yes') ON CONFLICT (id) DO UPDATE SET context = EXCLUDED.context, templates = EXCLUDED.templates, allow = EXCLUDED.allow;"
 ```
 
 ### 2) Параметры для замены
 Замените `domophone` / `password123` на фактические логин и пароль домофона.
 
-### 2.1) Заполнение адреса для subtitle
-Адрес отображается в приложении как подзаголовок входящего вызова. Таблица `endpoint_addresses` создаётся бэкендом при старте. Значение `endpoint_id` должно совпадать с `id` домофона в `ps_endpoints` (например `domophone`). Адрес замените на нужный.
+### 2.1) Привязка панели к адресу для маршрутизации вызова
+Схема таблиц `addresses` и `panels` создаётся бэкендом автоматически (`ensureSchema`).
+Возьмите `address_id` из [ADD_ADDRESS.md](ADD_ADDRESS.md), IP панели — из [GET_DOMOPHONE_IP.md](GET_DOMOPHONE_IP.md) (переменная `$PANEL_IP`).
 
 ```bash
 cd /opt/intercom-backend
-docker compose exec -T postgres psql -U postgres -d intercom -c "INSERT INTO endpoint_addresses (endpoint_id, address) VALUES ('domophone', 'ул. Куликова, д. 73 корп. 2') ON CONFLICT (endpoint_id) DO UPDATE SET address = EXCLUDED.address;"
+set -a && source .env && set +a
+test -n "$PANEL_IP"
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "INSERT INTO panels (ip, address_id, created_at, updated_at) VALUES ('$PANEL_IP'::inet, 1, NOW(), NOW()) ON CONFLICT (ip) DO UPDATE SET address_id = EXCLUDED.address_id, updated_at = NOW();"
 ```
 
 ### 3) Проверка данных в Postgres
 ```bash
-docker compose exec -T postgres psql -U postgres -d intercom -c "SELECT * FROM ps_aors WHERE id='domophone';"
-docker compose exec -T postgres psql -U postgres -d intercom -c "SELECT * FROM ps_auths WHERE id='domophone';"
-docker compose exec -T postgres psql -U postgres -d intercom -c "SELECT * FROM ps_endpoints WHERE id='domophone';"
-docker compose exec -T postgres psql -U postgres -d intercom -c "SELECT * FROM endpoint_addresses WHERE endpoint_id='domophone';"
+set -a && source .env && set +a
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT * FROM ps_aors WHERE id='domophone';"
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT * FROM ps_auths WHERE id='domophone';"
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT * FROM ps_endpoints WHERE id='domophone';"
+test -n "$PANEL_IP"
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT id, ip, address_id, created_at, updated_at FROM panels WHERE ip='$PANEL_IP'::inet;"
 ```
 
 Пример вывода:
@@ -48,9 +54,9 @@ docker compose exec -T postgres psql -U postgres -d intercom -c "SELECT * FROM e
  domophone | transport-udp | domophone | domophone | from-domophone | all      | ulaw,alaw,h264 |           | tpl_domophone | no           | yes         | yes             | yes
 (1 row)
 
- endpoint_id |           address            
--------------+-----------------------------
- domophone   | ул. Куликова, д. 73 корп. 2
+ id |      ip      | address_id |          created_at           |          updated_at
+----+--------------+------------+-------------------------------+-------------------------------
+  1 | X.X.X.X      |          1 | 2026-01-01 00:00:00+00        | 2026-01-01 00:00:00+00
 (1 row)
 ```
 

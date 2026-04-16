@@ -9,7 +9,7 @@ LOG_FILE="${LOG_DIR}/install.log"
 FIREBASE_JSON_FILE=$(ls "${ROOT_DIR}"/*-firebase-adminsdk-*.json 2>/dev/null | head -n1) || true
 ASTERISK_MAJOR="22"
 ASTERISK_TARBALL="asterisk-${ASTERISK_MAJOR}-current.tar.gz"
-NPM_VERSION="11.8.0"
+NPM_VERSION="11.12.1"
 
 if [[ -t 1 ]]; then
   COLOR_BLUE="\033[34m"
@@ -148,18 +148,19 @@ require_var() {
 section "Установка сервера intercom"
 
 section "Проверка переменных окружения"
-require_var SERVER_DOMAIN
-require_var SERVER_IP
 require_var ARI_USER
 require_var ARI_PASSWORD
-require_var REDIS_PASSWORD
-require_var TURN_USER
-require_var TURN_PASSWORD
+require_var DOCKER_USER
+require_var DOCKER_PASSWORD
+require_var FAIL2BAN_IGNOREIP
 require_var POSTGRES_DB
 require_var POSTGRES_USER
 require_var POSTGRES_PASSWORD
-require_var DOCKER_USER
-require_var DOCKER_PASSWORD
+require_var REDIS_PASSWORD
+require_var SERVER_DOMAIN
+require_var SERVER_IP
+require_var TURN_USER
+require_var TURN_PASSWORD
 ok "Переменные окружения найдены"
 
 section "Обновление ОС и установка системных зависимостей"
@@ -483,6 +484,10 @@ else
 mkdir -p /etc/fail2ban/filter.d
 cp "${CONFIG_DIR}/fail2ban/jail.local" /etc/fail2ban/jail.local
 cp "${CONFIG_DIR}/fail2ban/filter.d/asterisk.conf" /etc/fail2ban/filter.d/asterisk.conf
+cp "${CONFIG_DIR}/fail2ban/filter.d/auth-requests.conf" /etc/fail2ban/filter.d/auth-requests.conf
+cp "${CONFIG_DIR}/fail2ban/filter.d/auth-verify.conf" /etc/fail2ban/filter.d/auth-verify.conf
+cp "${CONFIG_DIR}/fail2ban/filter.d/auth-combined.conf" /etc/fail2ban/filter.d/auth-combined.conf
+sed -i "s|__FAIL2BAN_IGNOREIP__|${FAIL2BAN_IGNOREIP}|g" /etc/fail2ban/jail.local
 cp "${CONFIG_DIR}/fail2ban/fail2ban.sqlite3" /var/lib/fail2ban/fail2ban.sqlite3
 chown root:root /var/lib/fail2ban/fail2ban.sqlite3
 chmod 600 /var/lib/fail2ban/fail2ban.sqlite3
@@ -490,6 +495,9 @@ systemctl enable fail2ban >> "${LOG_FILE}" 2>&1
 systemctl start fail2ban >> "${LOG_FILE}" 2>&1
 if [[ -s /etc/fail2ban/jail.local ]] \
   && [[ -s /etc/fail2ban/filter.d/asterisk.conf ]] \
+  && [[ -s /etc/fail2ban/filter.d/auth-requests.conf ]] \
+  && [[ -s /etc/fail2ban/filter.d/auth-verify.conf ]] \
+  && [[ -s /etc/fail2ban/filter.d/auth-combined.conf ]] \
   && systemctl is-active --quiet fail2ban; then
   ok "fail2ban настроен"
 else

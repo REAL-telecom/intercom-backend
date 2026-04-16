@@ -1,28 +1,27 @@
 #!/bin/bash
-# Скрипт для разбана IP и добавления в белый список fail2ban
+# Скрипт для разбана IP во всех jail проекта
 
 if [ -z "$1" ]; then
     echo "Использование: $0 <IP_ADDRESS>"
-    echo "Пример: $0 5.39.53.85"
+    echo "Пример: $0 X.X.X.X"
     exit 1
 fi
 
 IP=$1
+JAILS=(asterisk auth-combined auth-requests auth-verify sshd)
 
 echo "Разбаниваю IP: $IP"
-sudo fail2ban-client set asterisk unbanip "$IP"
-
-if [ $? -eq 0 ]; then
-    echo "✓ IP $IP разбанен"
-else
-    echo "✗ Ошибка при разбане. Попробуйте:"
-    echo "  sudo iptables -D f2b-ASTERISK -s $IP -j REJECT --reject-with icmp-port-unreachable"
-    exit 1
-fi
+for JAIL in "${JAILS[@]}"; do
+  if sudo fail2ban-client set "$JAIL" unbanip "$IP" >/dev/null 2>&1; then
+    echo "✓ [$JAIL] IP $IP разбанен"
+  else
+    echo "- [$JAIL] IP не найден в бане или jail недоступен"
+  fi
+done
 
 echo ""
 echo "Добавляю IP в белый список (ignoreip)..."
-echo "ВАЖНО: Добавьте IP $IP в файл /etc/fail2ban/jail.local в секцию [asterisk]:"
-echo "  ignoreip = 127.0.0.1/8 ::1 $IP"
+echo "ВАЖНО: Добавьте IP $IP в файл /etc/fail2ban/jail.local в секции:"
+echo "  [sshd], [asterisk], [auth-combined], [auth-requests], [auth-verify]"
 echo ""
-echo "Затем выполните: sudo fail2ban-client reload asterisk"
+echo "Затем выполните: sudo fail2ban-client reload"
