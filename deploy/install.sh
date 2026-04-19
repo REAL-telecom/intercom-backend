@@ -100,7 +100,7 @@ run_with_spinner() {
   wait "${pid}"
   local status=$?
   if [[ ${status} -eq 0 ]]; then
-    printf "\r%s ... done\n" "${label}" > "${out}"
+    printf "\r%s ... готово\n" "${label}" > "${out}"
   else
     printf "\r%s ... failed\n" "${label}" > "${out}"
   fi
@@ -293,43 +293,61 @@ fi
 fi
 
 section "Копирование файлов конфигураций Asterisk"
-mkdir -p /etc/asterisk
-cp "${CONFIG_DIR}/asterisk/"*.conf /etc/asterisk/
-
-sed -i "s/__SERVER_IP__/${SERVER_IP}/g" /etc/asterisk/rtp.conf
-sed -i "s/__SERVER_IP__/${SERVER_IP}/g" /etc/asterisk/pjsip.conf
-sed -i "s/__SERVER_DOMAIN__/${SERVER_DOMAIN}/g" /etc/asterisk/http.conf
-sed -i "s/__SERVER_DOMAIN__/${SERVER_DOMAIN}/g" /etc/asterisk/pjsip.conf
-sed -i "s/__ARI_USER__/${ARI_USER}/g" /etc/asterisk/ari.conf
-sed -i "s/__ARI_PASSWORD__/${ARI_PASSWORD}/g" /etc/asterisk/ari.conf
-sed -i "s/__POSTGRES_DB__/${POSTGRES_DB}/g" /etc/asterisk/res_pgsql.conf
-sed -i "s/__POSTGRES_USER__/${POSTGRES_USER}/g" /etc/asterisk/res_pgsql.conf
-sed -i "s/__POSTGRES_PASSWORD__/${POSTGRES_PASSWORD}/g" /etc/asterisk/res_pgsql.conf
-ls -la /etc/asterisk | sed -n '1,120p' >> "${LOG_FILE}" 2>&1
-if [[ -s /etc/asterisk/ari.conf ]] \
+if skip_if_done sh -c '[[ -s /etc/asterisk/ari.conf ]] \
   && [[ -s /etc/asterisk/http.conf ]] \
   && [[ -s /etc/asterisk/pjsip.conf ]] \
   && [[ -s /etc/asterisk/rtp.conf ]] \
   && [[ -s /etc/asterisk/res_pgsql.conf ]] \
-  && ! grep -q '__SERVER_IP__' /etc/asterisk/rtp.conf \
-  && ! grep -q '__SERVER_IP__' /etc/asterisk/pjsip.conf \
-  && ! grep -q '__SERVER_DOMAIN__' /etc/asterisk/http.conf \
-  && ! grep -q '__SERVER_DOMAIN__' /etc/asterisk/pjsip.conf \
-  && ! grep -q '__ARI_USER__' /etc/asterisk/ari.conf \
-  && ! grep -q '__ARI_PASSWORD__' /etc/asterisk/ari.conf; then
-  ok "Файлы конфигураций успешно скопированы"
+  && ! grep -q "__SERVER_IP__" /etc/asterisk/rtp.conf \
+  && ! grep -q "__SERVER_IP__" /etc/asterisk/pjsip.conf \
+  && ! grep -q "__SERVER_DOMAIN__" /etc/asterisk/http.conf \
+  && ! grep -q "__SERVER_DOMAIN__" /etc/asterisk/pjsip.conf \
+  && ! grep -q "__ARI_USER__" /etc/asterisk/ari.conf \
+  && ! grep -q "__ARI_PASSWORD__" /etc/asterisk/ari.conf'; then
+  :
 else
-  warn "Ошибка копирования файлов конфигурации Asterisk. Смотри лог: ${LOG_FILE}"
+  mkdir -p /etc/asterisk
+  cp "${CONFIG_DIR}/asterisk/"*.conf /etc/asterisk/
+
+  sed -i "s/__SERVER_IP__/${SERVER_IP}/g" /etc/asterisk/rtp.conf
+  sed -i "s/__SERVER_IP__/${SERVER_IP}/g" /etc/asterisk/pjsip.conf
+  sed -i "s/__SERVER_DOMAIN__/${SERVER_DOMAIN}/g" /etc/asterisk/http.conf
+  sed -i "s/__SERVER_DOMAIN__/${SERVER_DOMAIN}/g" /etc/asterisk/pjsip.conf
+  sed -i "s/__ARI_USER__/${ARI_USER}/g" /etc/asterisk/ari.conf
+  sed -i "s/__ARI_PASSWORD__/${ARI_PASSWORD}/g" /etc/asterisk/ari.conf
+  sed -i "s/__POSTGRES_DB__/${POSTGRES_DB}/g" /etc/asterisk/res_pgsql.conf
+  sed -i "s/__POSTGRES_USER__/${POSTGRES_USER}/g" /etc/asterisk/res_pgsql.conf
+  sed -i "s/__POSTGRES_PASSWORD__/${POSTGRES_PASSWORD}/g" /etc/asterisk/res_pgsql.conf
+  ls -la /etc/asterisk | sed -n '1,120p' >> "${LOG_FILE}" 2>&1
+  if [[ -s /etc/asterisk/ari.conf ]] \
+    && [[ -s /etc/asterisk/http.conf ]] \
+    && [[ -s /etc/asterisk/pjsip.conf ]] \
+    && [[ -s /etc/asterisk/rtp.conf ]] \
+    && [[ -s /etc/asterisk/res_pgsql.conf ]] \
+    && ! grep -q '__SERVER_IP__' /etc/asterisk/rtp.conf \
+    && ! grep -q '__SERVER_IP__' /etc/asterisk/pjsip.conf \
+    && ! grep -q '__SERVER_DOMAIN__' /etc/asterisk/http.conf \
+    && ! grep -q '__SERVER_DOMAIN__' /etc/asterisk/pjsip.conf \
+    && ! grep -q '__ARI_USER__' /etc/asterisk/ari.conf \
+    && ! grep -q '__ARI_PASSWORD__' /etc/asterisk/ari.conf; then
+    ok "Файлы конфигураций успешно скопированы"
+  else
+    warn "Ошибка копирования файлов конфигурации Asterisk. Смотри лог: ${LOG_FILE}"
+  fi
 fi
 
 section "Копирование звуков Asterisk (OTP и др.)"
-if [[ -d "${CONFIG_DIR}/asterisk/sounds/ru/custom/otp" ]]; then
-  mkdir -p /var/lib/asterisk/sounds/ru/custom/otp
-  cp -a "${CONFIG_DIR}/asterisk/sounds/ru/custom/otp/." /var/lib/asterisk/sounds/ru/custom/otp/
-  chown -R asterisk:asterisk /var/lib/asterisk/sounds/ru/custom/otp
-  ok "Звуки скопированы в /var/lib/asterisk/sounds/ru/custom/otp"
+if skip_if_done test -d /var/lib/asterisk/sounds/ru/custom/otp 2>/dev/null; then
+  :
 else
-  warn "Каталог звуков ${CONFIG_DIR}/asterisk/sounds/ru/custom/otp не найден — пропуск"
+  if [[ -d "${CONFIG_DIR}/asterisk/sounds/ru/custom/otp" ]]; then
+    mkdir -p /var/lib/asterisk/sounds/ru/custom/otp
+    cp -a "${CONFIG_DIR}/asterisk/sounds/ru/custom/otp/." /var/lib/asterisk/sounds/ru/custom/otp/
+    chown -R asterisk:asterisk /var/lib/asterisk/sounds/ru/custom/otp
+    ok "Звуки скопированы в /var/lib/asterisk/sounds/ru/custom/otp"
+  else
+    warn "Каталог звуков ${CONFIG_DIR}/asterisk/sounds/ru/custom/otp не найден — пропуск"
+  fi
 fi
 
 section "Установка утилиты управления Asterisk-логов"
@@ -491,6 +509,8 @@ sed -i "s|__FAIL2BAN_IGNOREIP__|${FAIL2BAN_IGNOREIP}|g" /etc/fail2ban/jail.local
 cp "${CONFIG_DIR}/fail2ban/fail2ban.sqlite3" /var/lib/fail2ban/fail2ban.sqlite3
 chown root:root /var/lib/fail2ban/fail2ban.sqlite3
 chmod 600 /var/lib/fail2ban/fail2ban.sqlite3
+touch /var/log/asterisk/messages
+chown asterisk:asterisk /var/log/asterisk/messages
 systemctl enable fail2ban >> "${LOG_FILE}" 2>&1
 systemctl start fail2ban >> "${LOG_FILE}" 2>&1
 if [[ -s /etc/fail2ban/jail.local ]] \

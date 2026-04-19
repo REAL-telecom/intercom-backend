@@ -1,16 +1,19 @@
 ## Привязка существующего пользователя к адресу и квартире
 
-Эта инструкция **не создаёт** пользователя.  
-Пользователь уже должен существовать после OTP-верификации (`/auth/verify-code`).
+Переменные берутся из `.env` (секция **TEST USER**).
 
-Параметры задаются в **`.env`**, секция **TEST USER** в [`.env.example`](../.env.example).
+Пользователь уже должен существовать после OTP-верификации через приложение (`/auth/verify-code`).
 
-### 1) Проверить, что пользователь есть
+### 1) Перейти в каталог и загрузить окружение
 
 ```bash
 cd /opt/intercom-backend
 set -a && source .env && set +a
+```
 
+### 2) Проверить, что пользователь есть
+
+```bash
 docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
 SELECT id, phone, address_id, apartment, created_at, updated_at, last_verified_at
 FROM users
@@ -20,15 +23,7 @@ WHERE phone = '${TEST_USER_PHONE}';
 
 Если строка не найдена — сначала пройдите OTP-верификацию в приложении.
 
-### 2) Привязать пользователя к адресу и квартире
-
-В `.env` задайте параметры пользователя для привязки:
-
-```dotenv
-TEST_USER_PHONE=79000000000
-TEST_USER_ADDRESS_ID=1
-TEST_USER_APARTMENT=1
-```
+### 3) Привязать пользователя к адресу и квартире
 
 ```bash
 docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
@@ -40,12 +35,9 @@ WHERE phone = '${TEST_USER_PHONE}';
 "
 ```
 
-### 3) Проверить результат
+### 4) Проверить результат
 
 ```bash
-cd /opt/intercom-backend
-set -a && source .env && set +a
-
 docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
 SELECT id, phone, address_id, apartment, created_at, updated_at, last_verified_at
 FROM users

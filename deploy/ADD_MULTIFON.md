@@ -1,29 +1,17 @@
 ## МультиФон Бизнес (исходящие звонки / OTP)
 
-Учётные данные **`MULTIFON_PHONE`** и **`MULTIFON_PASSWORD`** задаются в **`.env`** (см. [`.env.example`](../.env.example), секция **MULTIFON**).
+Учётные данные `MULTIFON_PHONE` и `MULTIFON_PASSWORD` задаются в **`.env`** (секция **MULTIFON**).
 
-Регистрация SIP и учётные данные транка хранятся в таблицах PostgreSQL `ps_*` (realtime PJSIP). Звуки OTP лежат в репозитории в `configs/asterisk/sounds/ru/custom/otp/` и при установке копируются в `/var/lib/asterisk/sounds/ru/custom/otp/` (см. `deploy/install.sh`).
-
-Убедитесь, что в `/etc/asterisk` уже развёрнуты из репозитория:
-
-- `extconfig.conf` — строка `ps_registrations => pgsql,asterisk`
-- `sorcery.conf` — секция `[res_pjsip_outbound_registration]` и строка `registration=realtime,ps_registrations` (не под `[res_pjsip]`, см. [Asterisk #1651](https://github.com/asterisk/asterisk/issues/1651))
-
-
-После первого запуска бэкенда таблицы `ps_*` и `ps_registrations` создаются через `ensureSchema` в `src/store/postgres.ts`. На чистой БД достаточно заполнить строки ниже.
-
-### 1) Переменные Postgres
-
-В каталоге проекта с `.env`:
+### 1) Перейти в каталог проекта и загрузить окружение
 
 ```bash
 cd /opt/intercom-backend
 set -a && source .env && set +a
 ```
 
-### 2) Заполнение Multifon (номер и пароль берутся из `$MULTIFON_PHONE` / `$MULTIFON_PASSWORD`)
+### 2) Заполнить таблицы Postgres
 
-**Auth** — `realm = BREDBAND` совпадает с `Proxy-Authenticate` у SBC; при отказе digest попробуйте `UPDATE ps_auths SET realm = NULL WHERE id = 'multifon-auth';`.
+**Auth:**
 
 ```bash
 docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
@@ -43,7 +31,9 @@ ON CONFLICT (id) DO UPDATE SET
 docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
 INSERT INTO ps_aors (id, max_contacts, contact)
 VALUES ('multifon-aor', 1, 'sip:sbc.megafon.ru:5060')
-ON CONFLICT (id) DO UPDATE SET max_contacts = EXCLUDED.max_contacts, contact = EXCLUDED.contact;
+ON CONFLICT (id) DO UPDATE SET
+  max_contacts = EXCLUDED.max_contacts,
+  contact = EXCLUDED.contact;
 "
 ```
 
@@ -92,7 +82,7 @@ ON CONFLICT (id) DO UPDATE SET
 "
 ```
 
-**Registration** — после переноса в БД секцию `[multifon-registration]` в `pjsip.conf` нужно удалить или закомментировать, иначе дублирование.
+**Registration**
 
 ```bash
 docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
@@ -116,45 +106,31 @@ ON CONFLICT (id) DO UPDATE SET
 "
 ```
 
-### 3) Статический `pjsip.conf`
-
-Не дублируйте в файле объекты, которые уже в БД: `[multifon-auth]`, `[multifon-aor]`, `[multifon]` (endpoint), `[multifon-registration]`. Оставьте `[transport-udp]`, `[global]`, при необходимости `[multifon-identify]`.
-
-### 4) Проверка данных в Postgres
+### 3) Проверить данные в Postgres
 
 ```bash
-docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT id, username, realm FROM ps_auths WHERE id = 'multifon-auth';"
-docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT * FROM ps_registrations WHERE id = 'multifon-registration';"
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+SELECT id, username, realm FROM ps_auths WHERE id = 'multifon-auth';
+"
+
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+SELECT id, server_uri, client_uri, expiration FROM ps_registrations WHERE id = 'multifon-registration';
+"
 ```
 
-### 5) Проверка в Asterisk
-
-После изменения `sorcery.conf` или `extconfig.conf` выполните `sudo systemctl restart asterisk` (одного `module reload` может быть недостаточно).
+### 5) Применить настройки и проверить регистрацию в Asterisk
 
 ```bash
 sudo asterisk -rx "module reload res_pjsip.so"
-sudo asterisk -rx "pjsip show auths"
-sudo asterisk -rx "pjsip show endpoint multifon"
-sudo asterisk -rx "pjsip show registrations"
-sudo asterisk -rx "pjsip send register multifon-registration"
+sudo asterisk -rx "pjsip show registrations ${MULTIFON_PHONE}"
 ```
 
 Ожидается **Registered** для `multifon-registration`.
 
-### 6) Звуки OTP
-
-Файлы должны быть **8 kHz, mono, 16-bit PCM WAV**. Пример проверки:
+**Опциональные проверки (убедиться, что данные загрузились):`**
 
 ```bash
-file /var/lib/asterisk/sounds/ru/custom/otp/intro.wav
+sudo asterisk -rx "pjsip show endpoint multifon"
+sudo asterisk -rx "pjsip show aor multifon"
+sudo asterisk -rx "pjsip show auth multifon"
 ```
-
-### 7) Тест исходящего сценария (пример)
-
-В `extensions.conf` контекст с цепочкой `Playback(custom/otp/...)` без второго `Dial` на тот же номер; затем в CLI:
-
-```text
-channel originate PJSIP/79000000000@multifon extension s@otp-out-test
-```
-
-Подставьте реальный номер вместо `79000000000`.

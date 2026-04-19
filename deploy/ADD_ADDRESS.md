@@ -1,15 +1,17 @@
 ## Добавление адреса в базу
 
-Эта инструкция заполняет таблицу `addresses` (схема уже создаётся автоматически в `ensureSchema`).
+Переменные берутся из `.env` (секция **TEST ADDRESS**).
 
-### 1) Добавить адрес
-
-В `.env` задайте переменные секции **TEST ADDRESS** (см. [`.env.example`](../.env.example)) — без персональных данных, только тестовые значения.
+### 1) Перейти в каталог и загрузить окружение
 
 ```bash
 cd /opt/intercom-backend
 set -a && source .env && set +a
+```
 
+### 2) Добавить адрес
+
+```bash
 docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
 INSERT INTO addresses (street, house, building, letter, structure, created_at, updated_at)
 VALUES (
@@ -20,12 +22,11 @@ VALUES (
   NULLIF('${TEST_ADDRESS_STRUCTURE}', ''),
   NOW(),
   NOW()
-)
-RETURNING id, street, house, building, letter, structure;
+);
 "
 ```
 
-### 2) Проверить запись
+### 3) Проверить запись
 
 ```bash
 docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
@@ -36,4 +37,4 @@ LIMIT 10;
 "
 ```
 
-Сохраните `id` нужной записи — подставьте его в **`TEST_PANEL_ADDRESS_ID`** и при необходимости в **`TEST_USER_ADDRESS_ID`** в `.env` (см. [`.env.example`](../.env.example)).
+Сохраните полученный `id` и добавьте его в `.env` как `TEST_PANEL_ADDRESS_ID` и `TEST_USER_ADDRESS_ID`.
