@@ -1,6 +1,4 @@
 import crypto from "crypto";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { FastifyInstance } from "fastify";
 import { getOrCreateUser } from "../store/postgres";
 import {
@@ -26,17 +24,12 @@ import {
   setOtp,
 } from "../store/redis";
 
-const execFileAsync = promisify(execFile);
-
 const OTP_TTL_SEC = 300;
 
 const REQUEST_LIMIT_WINDOW_SEC = 1200;
 const VERIFY_LIMIT_WINDOW_SEC = 1200;
 const LIMIT_MAX_ATTEMPTS = 5;
 const BLOCK_TTL_SEC = 300;
-
-const FAIL2BAN_DB_PATH = "/var/lib/fail2ban/fail2ban.sqlite3";
-const FAIL2BAN_BACKEND_JAIL = "auth-combined";
 
 const MSG_PHONE_REQUIRED = "Укажите номер телефона";
 const MSG_PHONE_INVALID = "Некорректный номер телефона";
@@ -66,40 +59,6 @@ const logAuthLine = (
 ) => {
   const line = `[${tag}] ${message} ip=${ip} phone=${phone} route=${route}`;
   app.log[level](line);
-};
-
-/**
- * Escape SQL string literal for sqlite3 CLI query.
- */
-const toSqlLiteral = (value: string): string => {
-  return `'${value.replace(/'/g, "''")}'`;
-};
-
-/**
- * Check whether IP is currently banned for backend jail in fail2ban SQLite.
- */
-const isBackendIpBanned = async (ip: string, app: FastifyInstance): Promise<boolean> => {
-  const jail = toSqlLiteral(FAIL2BAN_BACKEND_JAIL);
-  const ipLiteral = toSqlLiteral(ip);
-
-  const sql = [
-    "SELECT CASE WHEN EXISTS (",
-    "  SELECT 1",
-    "  FROM bans",
-    `  WHERE jail = ${jail}`,
-    `    AND ip = ${ipLiteral}`,
-    "    AND (bantime = -1 OR timeofban + bantime > strftime('%s','now'))",
-    "  LIMIT 1",
-    ") THEN 1 ELSE 0 END;",
-  ].join(" ");
-
-  try {
-    const { stdout } = await execFileAsync("sqlite3", [FAIL2BAN_DB_PATH, sql]);
-    return stdout.trim() === "1";
-  } catch (err) {
-    app.log.warn({ err }, "auth fail2ban sqlite check failed");
-    return false;
-  }
 };
 
 /**
@@ -151,15 +110,6 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
     if (reqByIp >= LIMIT_MAX_ATTEMPTS || reqByPhone >= LIMIT_MAX_ATTEMPTS) {
       await Promise.all([blockOtpRequestByIp(ip, BLOCK_TTL_SEC), blockOtpRequestByPhone(phone, BLOCK_TTL_SEC)]);
       await resetOtpRequestRateLimitsForIpAndPhone(ip, phone);
-      logAuthLine(app, "warn", "AUTH_REQ_RATE_LIMITED", MSG_RATE_LIMITED, ip, phone, route);
-      return reply.header("Retry-After", String(BLOCK_TTL_SEC)).code(429).send({
-        success: false,
-        message: MSG_RATE_LIMITED,
-        blockExpiresAt: nowUnixSec() + BLOCK_TTL_SEC,
-      });
-    }
-
-    if (await isBackendIpBanned(ip, app)) {
       logAuthLine(app, "warn", "AUTH_REQ_RATE_LIMITED", MSG_RATE_LIMITED, ip, phone, route);
       return reply.header("Retry-After", String(BLOCK_TTL_SEC)).code(429).send({
         success: false,
@@ -232,15 +182,6 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
     if (!/^\d{5}$/.test(codeIn)) {
       logAuthLine(app, "warn", "AUTH_VERIFY_INVALID", MSG_PIN_FORMAT_INVALID, ip, phone, route);
       return reply.code(400).send({ success: false, message: MSG_PIN_FORMAT_INVALID });
-    }
-
-    if (await isBackendIpBanned(ip, app)) {
-      logAuthLine(app, "warn", "AUTH_VERIFY_RATE_LIMITED", MSG_RATE_LIMITED, ip, phone, route);
-      return reply.header("Retry-After", String(BLOCK_TTL_SEC)).code(429).send({
-        success: false,
-        message: MSG_RATE_LIMITED,
-        blockExpiresAt: nowUnixSec() + BLOCK_TTL_SEC,
-      });
     }
 
     const expected = await getOtp(phone);
