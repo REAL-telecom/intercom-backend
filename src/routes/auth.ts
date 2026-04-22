@@ -38,14 +38,15 @@ const BLOCK_TTL_SEC = 300;
 const FAIL2BAN_DB_PATH = "/var/lib/fail2ban/fail2ban.sqlite3";
 const FAIL2BAN_BACKEND_JAIL = "auth-combined";
 
-const MSG_PHONE_REQUIRED = "Укажите номер телефона.";
-const MSG_PHONE_INVALID = "Некорректный номер телефона.";
-const MSG_PIN_FORMAT_INVALID = "Некорректный формат пина.";
-const MSG_RATE_LIMITED = "Превышен лимит запросов.";
-const MSG_ALREADY_QUEUED = "Звонок уже в очереди.";
-const MSG_REQUEST_ACCEPTED = "Запрос на звонок принят.";
-const MSG_CODE_EXPIRED = "Срок кода истек.";
-const MSG_PIN_CONFIRMED = "Пин подтверждён.";
+const MSG_PHONE_REQUIRED = "Укажите номер телефона";
+const MSG_PHONE_INVALID = "Некорректный номер телефона";
+const MSG_PIN_FORMAT_INVALID = "Некорректный формат пина";
+const MSG_RATE_LIMITED = "Превышен лимит запросов";
+const MSG_ALREADY_QUEUED = "Звонок уже в очереди";
+const MSG_REQUEST_ACCEPTED = "Запрос на звонок принят";
+const MSG_CODE_EXPIRED = "Код устарел";
+const MSG_PIN_CONFIRMED = "Пин подтверждён";
+const MSG_PIN_INVALID = "Неверный пин";
 
 type LogLevel = "info" | "warn";
 
@@ -262,11 +263,8 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
         });
       }
 
-      const attempt = Math.min(Math.max(verifyByIp, verifyByPhone), LIMIT_MAX_ATTEMPTS);
-      const attemptsLeft = Math.max(0, LIMIT_MAX_ATTEMPTS - attempt);
-      const message = `Некорректный пин. Осталось попыток: ${attemptsLeft}.`;
-      logAuthLine(app, "warn", "AUTH_VERIFY_WRONG_CODE", message, ip, phone, route);
-      return reply.code(400).send({ success: false, message });
+      logAuthLine(app, "warn", "AUTH_VERIFY_WRONG_CODE", MSG_PIN_INVALID, ip, phone, route);
+      return reply.code(400).send({ success: false, message: MSG_PIN_INVALID });
     }
 
     const user = await getOrCreateUser(phone);
