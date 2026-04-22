@@ -1,4 +1,4 @@
-import { redisClient } from "../client";
+import { redisBlockingClient, redisClient } from "../client";
 
 export type OtpCallJob = {
   phone: string;
@@ -36,7 +36,7 @@ export const isOtpCallQueued = async (phone: string): Promise<boolean> => {
  * Returns null on timeout.
  */
 export const waitOtpCall = async (timeoutSec: number): Promise<OtpCallJob | null> => {
-  const response = await redisClient.blpop(OTP_QUEUE_KEY, timeoutSec);
+  const response = await redisBlockingClient.blpop(OTP_QUEUE_KEY, timeoutSec);
   if (!response || response.length < 2) return null;
 
   const value = response[1];
