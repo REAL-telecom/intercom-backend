@@ -147,7 +147,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
 
     const reqByIp = await incrementOtpRequestCounterByIp(ip, REQUEST_LIMIT_WINDOW_SEC);
     const reqByPhone = await incrementOtpRequestCounterByPhone(phone, REQUEST_LIMIT_WINDOW_SEC);
-    if (reqByIp > LIMIT_MAX_ATTEMPTS || reqByPhone > LIMIT_MAX_ATTEMPTS) {
+    if (reqByIp >= LIMIT_MAX_ATTEMPTS || reqByPhone >= LIMIT_MAX_ATTEMPTS) {
       await Promise.all([blockOtpRequestByIp(ip, BLOCK_TTL_SEC), blockOtpRequestByPhone(phone, BLOCK_TTL_SEC)]);
       await resetOtpRequestRateLimitsForIpAndPhone(ip, phone);
       logAuthLine(app, "warn", "AUTH_REQ_RATE_LIMITED", MSG_RATE_LIMITED, ip, phone, route);
@@ -251,7 +251,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
     if (expected !== codeIn) {
       const verifyByIp = await incrementOtpVerifyCounterByIp(ip, VERIFY_LIMIT_WINDOW_SEC);
       const verifyByPhone = await incrementOtpVerifyCounterByPhone(phone, VERIFY_LIMIT_WINDOW_SEC);
-      if (verifyByIp > LIMIT_MAX_ATTEMPTS || verifyByPhone > LIMIT_MAX_ATTEMPTS) {
+      if (verifyByIp >= LIMIT_MAX_ATTEMPTS || verifyByPhone >= LIMIT_MAX_ATTEMPTS) {
         await Promise.all([blockOtpVerifyByIp(ip, BLOCK_TTL_SEC), blockOtpVerifyByPhone(phone, BLOCK_TTL_SEC)]);
         await resetOtpVerifyRateLimitsForIpAndPhone(ip, phone);
         logAuthLine(app, "warn", "AUTH_VERIFY_RATE_LIMITED", MSG_RATE_LIMITED, ip, phone, route);
@@ -263,7 +263,8 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
       }
 
       const attempt = Math.min(Math.max(verifyByIp, verifyByPhone), LIMIT_MAX_ATTEMPTS);
-      const message = `Некорректный пин. Попытка ${attempt}.`;
+      const attemptsLeft = Math.max(0, LIMIT_MAX_ATTEMPTS - attempt);
+      const message = `Некорректный пин. Осталось попыток: ${attemptsLeft}.`;
       logAuthLine(app, "warn", "AUTH_VERIFY_WRONG_CODE", message, ip, phone, route);
       return reply.code(400).send({ success: false, message });
     }
