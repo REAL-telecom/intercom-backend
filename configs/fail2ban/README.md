@@ -173,6 +173,15 @@ sudo fail2ban-client status auth-combined
 
 В выводе будут строки `Currently banned:` (число) и `Banned IP list:` (список адресов через пробел). Если забаненных нет, список будет пустым. «Total banned» — сколько всего раз банили за всё время; в «Banned IP list» только те IP, которые заблокированы в данный момент.
 
+#### Посмотреть список всех забаненных адресов
+
+```bash
+for j in auth-requests auth-verify auth-combined; do
+  echo "=== $j ==="
+  sudo fail2ban-client get "$j" banip
+done
+```
+
 #### Проверка конкретного IP
 
 Прямой команды «статус по адресу» в fail2ban нет. Можно проверить, есть ли IP в списке забаненных для джейла:

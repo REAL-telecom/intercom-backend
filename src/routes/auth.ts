@@ -80,6 +80,8 @@ const normalizePhone = (raw: string): string | null => {
 export const registerAuthRoutes = async (app: FastifyInstance) => {
   /**
    * Generate 5-digit code, store it in Redis with TTL, and enqueue OTP call.
+   * On success, responses include pinExpiresAt (Unix seconds): deadline after which
+   * the current OTP for this phone is no longer valid (aligned with Redis OTP TTL).
    */
   app.post<{ Body: { phone?: string } }>("/auth/request-code", async (request, reply) => {
     const route = "/auth/request-code";
@@ -128,6 +130,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
         success: true,
         message: MSG_ALREADY_QUEUED,
         nextRequestAvailableAt: nowUnixSec() + 60,
+        pinExpiresAt: nowUnixSec() + OTP_TTL_SEC,
       });
     }
 
@@ -140,6 +143,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
         success: true,
         message: MSG_ALREADY_QUEUED,
         nextRequestAvailableAt: nowUnixSec() + 60,
+        pinExpiresAt: nowUnixSec() + OTP_TTL_SEC,
       });
     }
 
@@ -148,11 +152,13 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
       success: true,
       message: MSG_REQUEST_ACCEPTED,
       nextRequestAvailableAt: nowUnixSec() + 60,
+      pinExpiresAt: nowUnixSec() + OTP_TTL_SEC,
     });
   });
 
   /**
    * Validate phone + code pair against Redis and create user row on success.
+   * Expired OTP attempts count toward the same verify rate limits as wrong PIN.
    */
   app.post<{ Body: { phone?: string; code?: string } }>("/auth/verify-code", async (request, reply) => {
     const route = "/auth/verify-code";
@@ -186,6 +192,19 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
 
     const expected = await getOtp(phone);
     if (!expected) {
+      const verifyByIpExpired = await incrementOtpVerifyCounterByIp(ip, VERIFY_LIMIT_WINDOW_SEC);
+      const verifyByPhoneExpired = await incrementOtpVerifyCounterByPhone(phone, VERIFY_LIMIT_WINDOW_SEC);
+      if (verifyByIpExpired >= LIMIT_MAX_ATTEMPTS || verifyByPhoneExpired >= LIMIT_MAX_ATTEMPTS) {
+        await Promise.all([blockOtpVerifyByIp(ip, BLOCK_TTL_SEC), blockOtpVerifyByPhone(phone, BLOCK_TTL_SEC)]);
+        await resetOtpVerifyRateLimitsForIpAndPhone(ip, phone);
+        logAuthLine(app, "warn", "AUTH_VERIFY_RATE_LIMITED", MSG_RATE_LIMITED, ip, phone, route);
+        return reply.header("Retry-After", String(BLOCK_TTL_SEC)).code(429).send({
+          success: false,
+          message: MSG_RATE_LIMITED,
+          blockExpiresAt: nowUnixSec() + BLOCK_TTL_SEC,
+        });
+      }
+
       logAuthLine(app, "warn", "AUTH_VERIFY_EXPIRED", MSG_CODE_EXPIRED, ip, phone, route);
       return reply.code(410).send({ success: false, message: MSG_CODE_EXPIRED });
     }
