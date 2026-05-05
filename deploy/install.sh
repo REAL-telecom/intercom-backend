@@ -502,9 +502,7 @@ else
 mkdir -p /etc/fail2ban/filter.d
 cp "${CONFIG_DIR}/fail2ban/jail.local" /etc/fail2ban/jail.local
 cp "${CONFIG_DIR}/fail2ban/filter.d/asterisk.conf" /etc/fail2ban/filter.d/asterisk.conf
-cp "${CONFIG_DIR}/fail2ban/filter.d/auth-requests.conf" /etc/fail2ban/filter.d/auth-requests.conf
-cp "${CONFIG_DIR}/fail2ban/filter.d/auth-verify.conf" /etc/fail2ban/filter.d/auth-verify.conf
-cp "${CONFIG_DIR}/fail2ban/filter.d/auth-combined.conf" /etc/fail2ban/filter.d/auth-combined.conf
+cp "${CONFIG_DIR}/fail2ban/filter.d/auth.conf" /etc/fail2ban/filter.d/auth.conf
 sed -i "s|__FAIL2BAN_IGNOREIP__|${FAIL2BAN_IGNOREIP}|g" /etc/fail2ban/jail.local
 cp "${CONFIG_DIR}/fail2ban/fail2ban.sqlite3" /var/lib/fail2ban/fail2ban.sqlite3
 chown root:root /var/lib/fail2ban/fail2ban.sqlite3
@@ -515,9 +513,7 @@ systemctl enable fail2ban >> "${LOG_FILE}" 2>&1
 systemctl start fail2ban >> "${LOG_FILE}" 2>&1
 if [[ -s /etc/fail2ban/jail.local ]] \
   && [[ -s /etc/fail2ban/filter.d/asterisk.conf ]] \
-  && [[ -s /etc/fail2ban/filter.d/auth-requests.conf ]] \
-  && [[ -s /etc/fail2ban/filter.d/auth-verify.conf ]] \
-  && [[ -s /etc/fail2ban/filter.d/auth-combined.conf ]] \
+  && [[ -s /etc/fail2ban/filter.d/auth.conf ]] \
   && systemctl is-active --quiet fail2ban; then
   ok "fail2ban настроен"
 else

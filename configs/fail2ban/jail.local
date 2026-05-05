@@ -15,32 +15,12 @@ action = iptables-allports[name=ASTERISK, protocol=all]
 [sshd]
 ignoreip = 127.0.0.1/8 ::1 __FAIL2BAN_IGNOREIP__
 
-[auth-requests]
+[auth]
 enabled = true
-filter = auth-requests
+filter = auth
 backend = systemd
 journalmatch = _SYSTEMD_UNIT=intercom-backend.service
-maxretry = 12
+maxretry = 1
 bantime = -1
 ignoreip = 127.0.0.1/8 ::1 __FAIL2BAN_IGNOREIP__
-action = iptables-allports[name=AUTH_REQUESTS, protocol=all]
-
-[auth-verify]
-enabled = true
-filter = auth-verify
-backend = systemd
-journalmatch = _SYSTEMD_UNIT=intercom-backend.service
-maxretry = 18
-bantime = -1
-ignoreip = 127.0.0.1/8 ::1 __FAIL2BAN_IGNOREIP__
-action = iptables-allports[name=AUTH_VERIFY, protocol=all]
-
-[auth-combined]
-enabled = true
-filter = auth-combined
-backend = systemd
-journalmatch = _SYSTEMD_UNIT=intercom-backend.service
-maxretry = 14
-bantime = -1
-ignoreip = 127.0.0.1/8 ::1 __FAIL2BAN_IGNOREIP__
-action = iptables-allports[name=AUTH_COMBINED, protocol=all]
+action = iptables-allports[name=AUTH, protocol=all]

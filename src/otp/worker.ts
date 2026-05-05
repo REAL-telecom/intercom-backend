@@ -18,7 +18,7 @@ const OTP_OUT_CHANNEL_MAP_TTL_SEC = 3600;
 const OTP_WAIT_TIMEOUT_SEC = 1;
 
 const FAIL2BAN_DB_PATH = "/var/lib/fail2ban/fail2ban.sqlite3";
-const FAIL2BAN_BACKEND_JAIL = "auth-combined";
+const FAIL2BAN_BACKEND_JAIL = "auth";
 const OTP_WORKER_ROUTE = "otp-worker";
 
 const MSG_CALL_FAILED = "Не удалось совершить звонок.";

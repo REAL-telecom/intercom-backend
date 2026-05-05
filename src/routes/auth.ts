@@ -3,43 +3,37 @@ import { FastifyInstance } from "fastify";
 import { getOrCreateUser } from "../store/postgres";
 import {
   blockOtpRequestByIp,
-  blockOtpRequestByPhone,
   blockOtpVerifyByIp,
-  blockOtpVerifyByPhone,
   deleteOtp,
   enqueueOtpCall,
   getOtp,
+  getOtpRequestCounterByIp,
+  getOtpVerifyCounterByIp,
   incrementOtpRequestCounterByIp,
   incrementOtpRequestCounterByPhone,
   incrementOtpVerifyCounterByIp,
   incrementOtpVerifyCounterByPhone,
   isOtpCallQueued,
   isOtpRequestBlockedByIp,
-  isOtpRequestBlockedByPhone,
   isOtpVerifyBlockedByIp,
-  isOtpVerifyBlockedByPhone,
   resetOtpRateLimitsForIpAndPhone,
-  resetOtpRequestRateLimitsForIpAndPhone,
-  resetOtpVerifyRateLimitsForIpAndPhone,
   setOtp,
 } from "../store/redis";
 
-const OTP_TTL_SEC = 300;
+const OTP_TTL = 300;
+const RATE_LIMIT_TTL = 300;
+const RATE_LIMIT_ATTEMPTS = 5;
+const IP_LIMIT_ATTEMPTS = 10;
 
-const REQUEST_LIMIT_WINDOW_SEC = 1200;
-const VERIFY_LIMIT_WINDOW_SEC = 1200;
-const LIMIT_MAX_ATTEMPTS = 5;
-const BLOCK_TTL_SEC = 300;
-
-const MSG_PHONE_REQUIRED = "Укажите номер телефона";
+const MSG_IP_BLOCKED = "IP заблокирован";
 const MSG_PHONE_INVALID = "Некорректный номер телефона";
-const MSG_PIN_FORMAT_INVALID = "Некорректный формат пина";
-const MSG_RATE_LIMITED = "Превышен лимит запросов";
-const MSG_ALREADY_QUEUED = "Звонок уже в очереди";
-const MSG_REQUEST_ACCEPTED = "Запрос на звонок принят";
-const MSG_CODE_EXPIRED = "Код устарел";
 const MSG_PIN_CONFIRMED = "Пин подтверждён";
-const MSG_PIN_INVALID = "Неверный пин";
+const MSG_PIN_EXPIRED = "Код устарел";
+const MSG_PIN_INVALID = "Неверный код";
+const MSG_RATE_LIMITED = "Превышен лимит запросов";
+const MSG_REQUEST_ACCEPTED = "Запрос на звонок принят";
+const MSG_REQUEST_QUEUED = "Запрос в очереди";
+
 
 type LogLevel = "info" | "warn";
 
@@ -88,8 +82,8 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
     const ip = request.ip;
     const raw = request.body?.phone?.trim();
     if (!raw) {
-      logAuthLine(app, "warn", "AUTH_REQ_INVALID", MSG_PHONE_REQUIRED, ip, "-", route);
-      return reply.code(400).send({ success: false, message: MSG_PHONE_REQUIRED });
+      logAuthLine(app, "warn", "AUTH_REQ_INVALID", MSG_PHONE_INVALID, ip, "-", route);
+      return reply.code(400).send({ success: false, message: MSG_PHONE_INVALID });
     }
 
     const phone = normalizePhone(raw);
@@ -98,52 +92,75 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
       return reply.code(400).send({ success: false, message: MSG_PHONE_INVALID });
     }
 
-    if ((await isOtpRequestBlockedByIp(ip)) || (await isOtpRequestBlockedByPhone(phone))) {
-      logAuthLine(app, "warn", "AUTH_REQ_RATE_LIMITED", MSG_RATE_LIMITED, ip, phone, route);
-      return reply.header("Retry-After", String(BLOCK_TTL_SEC)).code(429).send({
+    if ((await isOtpRequestBlockedByIp(ip)) || (await isOtpVerifyBlockedByIp(ip))) {
+      logAuthLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
+      return reply.code(429).send({
         success: false,
-        message: MSG_RATE_LIMITED,
-        blockExpiresAt: nowUnixSec() + BLOCK_TTL_SEC,
+        message: MSG_IP_BLOCKED,
       });
     }
 
-    const reqByIp = await incrementOtpRequestCounterByIp(ip, REQUEST_LIMIT_WINDOW_SEC);
-    const reqByPhone = await incrementOtpRequestCounterByPhone(phone, REQUEST_LIMIT_WINDOW_SEC);
-    if (reqByIp >= LIMIT_MAX_ATTEMPTS || reqByPhone >= LIMIT_MAX_ATTEMPTS) {
-      await Promise.all([blockOtpRequestByIp(ip, BLOCK_TTL_SEC), blockOtpRequestByPhone(phone, BLOCK_TTL_SEC)]);
-      await resetOtpRequestRateLimitsForIpAndPhone(ip, phone);
+    const reqByIp = await incrementOtpRequestCounterByIp(ip, RATE_LIMIT_TTL);
+    if (reqByIp + (await getOtpVerifyCounterByIp(ip)) > IP_LIMIT_ATTEMPTS) {
+      await Promise.all([
+        blockOtpRequestByIp(ip, RATE_LIMIT_TTL),
+        blockOtpVerifyByIp(ip, RATE_LIMIT_TTL),
+        resetOtpRateLimitsForIpAndPhone(ip, phone),
+      ]);
+      logAuthLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
+      return reply.code(429).send({
+        success: false,
+        message: MSG_IP_BLOCKED,
+      });
+    }
+
+    const reqByPhone = await incrementOtpRequestCounterByPhone(phone, RATE_LIMIT_TTL);
+    if (reqByPhone >= IP_LIMIT_ATTEMPTS) {
+      await Promise.all([
+        blockOtpRequestByIp(ip, RATE_LIMIT_TTL),
+        blockOtpVerifyByIp(ip, RATE_LIMIT_TTL),
+        resetOtpRateLimitsForIpAndPhone(ip, phone),
+      ]);
+      logAuthLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
+      return reply.code(429).send({
+        success: false,
+        message: MSG_IP_BLOCKED,
+      });
+    }
+
+    if (reqByPhone >= RATE_LIMIT_ATTEMPTS) {
       logAuthLine(app, "warn", "AUTH_REQ_RATE_LIMITED", MSG_RATE_LIMITED, ip, phone, route);
-      return reply.header("Retry-After", String(BLOCK_TTL_SEC)).code(429).send({
+      return reply.header("Retry-After", String(RATE_LIMIT_TTL)).code(429).send({
         success: false,
         message: MSG_RATE_LIMITED,
-        blockExpiresAt: nowUnixSec() + BLOCK_TTL_SEC,
+        blockExpiresAt: nowUnixSec() + RATE_LIMIT_TTL,
       });
     }
 
     const existingCode = await getOtp(phone);
     if (existingCode || (await isOtpCallQueued(phone))) {
       if (existingCode) {
-        await setOtp(phone, existingCode, OTP_TTL_SEC);
+        await setOtp(phone, existingCode, OTP_TTL);
       }
-      logAuthLine(app, "info", "AUTH_REQ_QUEUED", MSG_ALREADY_QUEUED, ip, phone, route);
+      logAuthLine(app, "info", "AUTH_REQ_QUEUED", MSG_REQUEST_QUEUED, ip, phone, route);
       return reply.code(200).send({
         success: true,
-        message: MSG_ALREADY_QUEUED,
+        message: MSG_REQUEST_QUEUED,
         nextRequestAvailableAt: nowUnixSec() + 60,
-        pinExpiresAt: nowUnixSec() + OTP_TTL_SEC,
+        pinExpiresAt: nowUnixSec() + OTP_TTL,
       });
     }
 
     const code = String(crypto.randomInt(0, 100_000)).padStart(5, "0");
-    await setOtp(phone, code, OTP_TTL_SEC);
+    await setOtp(phone, code, OTP_TTL);
     const queued = await enqueueOtpCall({ phone, ip });
     if (!queued) {
-      logAuthLine(app, "info", "AUTH_REQ_QUEUED", MSG_ALREADY_QUEUED, ip, phone, route);
+      logAuthLine(app, "info", "AUTH_REQ_QUEUED", MSG_REQUEST_QUEUED, ip, phone, route);
       return reply.code(200).send({
         success: true,
-        message: MSG_ALREADY_QUEUED,
+        message: MSG_REQUEST_QUEUED,
         nextRequestAvailableAt: nowUnixSec() + 60,
-        pinExpiresAt: nowUnixSec() + OTP_TTL_SEC,
+        pinExpiresAt: nowUnixSec() + OTP_TTL,
       });
     }
 
@@ -152,7 +169,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
       success: true,
       message: MSG_REQUEST_ACCEPTED,
       nextRequestAvailableAt: nowUnixSec() + 60,
-      pinExpiresAt: nowUnixSec() + OTP_TTL_SEC,
+      pinExpiresAt: nowUnixSec() + OTP_TTL,
     });
   });
 
@@ -165,9 +182,9 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
     const ip = request.ip;
     const raw = request.body?.phone?.trim();
     const codeIn = request.body?.code?.trim();
-    if (!raw || codeIn === undefined || codeIn === "") {
-      logAuthLine(app, "warn", "AUTH_VERIFY_INVALID", MSG_PHONE_REQUIRED, ip, "-", route);
-      return reply.code(400).send({ success: false, message: MSG_PHONE_REQUIRED });
+    if (!raw) {
+      logAuthLine(app, "warn", "AUTH_VERIFY_INVALID", MSG_PHONE_INVALID, ip, "-", route);
+      return reply.code(400).send({ success: false, message: MSG_PHONE_INVALID });
     }
 
     const phone = normalizePhone(raw);
@@ -176,53 +193,71 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
       return reply.code(400).send({ success: false, message: MSG_PHONE_INVALID });
     }
 
-    if ((await isOtpVerifyBlockedByIp(ip)) || (await isOtpVerifyBlockedByPhone(phone))) {
-      logAuthLine(app, "warn", "AUTH_VERIFY_RATE_LIMITED", MSG_RATE_LIMITED, ip, phone, route);
-      return reply.header("Retry-After", String(BLOCK_TTL_SEC)).code(429).send({
+    if ((await isOtpRequestBlockedByIp(ip)) || (await isOtpVerifyBlockedByIp(ip))) {
+      logAuthLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
+      return reply.code(429).send({
         success: false,
-        message: MSG_RATE_LIMITED,
-        blockExpiresAt: nowUnixSec() + BLOCK_TTL_SEC,
+        message: MSG_IP_BLOCKED,
       });
     }
 
-    if (!/^\d{5}$/.test(codeIn)) {
-      logAuthLine(app, "warn", "AUTH_VERIFY_INVALID", MSG_PIN_FORMAT_INVALID, ip, phone, route);
-      return reply.code(400).send({ success: false, message: MSG_PIN_FORMAT_INVALID });
+    const verifyByIp = await incrementOtpVerifyCounterByIp(ip, RATE_LIMIT_TTL);
+    if (verifyByIp + (await getOtpRequestCounterByIp(ip)) > IP_LIMIT_ATTEMPTS) {
+      await Promise.all([
+        blockOtpRequestByIp(ip, RATE_LIMIT_TTL),
+        blockOtpVerifyByIp(ip, RATE_LIMIT_TTL),
+        resetOtpRateLimitsForIpAndPhone(ip, phone),
+      ]);
+      logAuthLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
+      return reply.code(429).send({
+        success: false,
+        message: MSG_IP_BLOCKED,
+      });
+    }
+
+    const verifyByPhone = await incrementOtpVerifyCounterByPhone(phone, RATE_LIMIT_TTL);
+    const applyVerifyLimits = async () => {
+      if (verifyByPhone >= IP_LIMIT_ATTEMPTS) {
+        await Promise.all([
+          blockOtpRequestByIp(ip, RATE_LIMIT_TTL),
+          blockOtpVerifyByIp(ip, RATE_LIMIT_TTL),
+          resetOtpRateLimitsForIpAndPhone(ip, phone),
+        ]);
+        logAuthLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
+        return reply.code(429).send({
+          success: false,
+          message: MSG_IP_BLOCKED,
+        });
+      }
+      if (verifyByPhone >= RATE_LIMIT_ATTEMPTS) {
+        logAuthLine(app, "warn", "AUTH_VERIFY_RATE_LIMITED", MSG_RATE_LIMITED, ip, phone, route);
+        return reply.header("Retry-After", String(RATE_LIMIT_TTL)).code(429).send({
+          success: false,
+          message: MSG_RATE_LIMITED,
+          blockExpiresAt: nowUnixSec() + RATE_LIMIT_TTL,
+        });
+      }
+      return null;
+    };
+
+    if (!codeIn || !/^\d{5}$/.test(codeIn)) {
+      const limited = await applyVerifyLimits();
+      if (limited) return limited;
+      logAuthLine(app, "warn", "AUTH_VERIFY_INVALID", MSG_PIN_INVALID, ip, phone, route);
+      return reply.code(400).send({ success: false, message: MSG_PIN_INVALID });
     }
 
     const expected = await getOtp(phone);
     if (!expected) {
-      const verifyByIpExpired = await incrementOtpVerifyCounterByIp(ip, VERIFY_LIMIT_WINDOW_SEC);
-      const verifyByPhoneExpired = await incrementOtpVerifyCounterByPhone(phone, VERIFY_LIMIT_WINDOW_SEC);
-      if (verifyByIpExpired >= LIMIT_MAX_ATTEMPTS || verifyByPhoneExpired >= LIMIT_MAX_ATTEMPTS) {
-        await Promise.all([blockOtpVerifyByIp(ip, BLOCK_TTL_SEC), blockOtpVerifyByPhone(phone, BLOCK_TTL_SEC)]);
-        await resetOtpVerifyRateLimitsForIpAndPhone(ip, phone);
-        logAuthLine(app, "warn", "AUTH_VERIFY_RATE_LIMITED", MSG_RATE_LIMITED, ip, phone, route);
-        return reply.header("Retry-After", String(BLOCK_TTL_SEC)).code(429).send({
-          success: false,
-          message: MSG_RATE_LIMITED,
-          blockExpiresAt: nowUnixSec() + BLOCK_TTL_SEC,
-        });
-      }
-
-      logAuthLine(app, "warn", "AUTH_VERIFY_EXPIRED", MSG_CODE_EXPIRED, ip, phone, route);
-      return reply.code(410).send({ success: false, message: MSG_CODE_EXPIRED });
+      const limited = await applyVerifyLimits();
+      if (limited) return limited;
+      logAuthLine(app, "warn", "AUTH_VERIFY_EXPIRED", MSG_PIN_EXPIRED, ip, phone, route);
+      return reply.code(410).send({ success: false, message: MSG_PIN_EXPIRED });
     }
 
     if (expected !== codeIn) {
-      const verifyByIp = await incrementOtpVerifyCounterByIp(ip, VERIFY_LIMIT_WINDOW_SEC);
-      const verifyByPhone = await incrementOtpVerifyCounterByPhone(phone, VERIFY_LIMIT_WINDOW_SEC);
-      if (verifyByIp >= LIMIT_MAX_ATTEMPTS || verifyByPhone >= LIMIT_MAX_ATTEMPTS) {
-        await Promise.all([blockOtpVerifyByIp(ip, BLOCK_TTL_SEC), blockOtpVerifyByPhone(phone, BLOCK_TTL_SEC)]);
-        await resetOtpVerifyRateLimitsForIpAndPhone(ip, phone);
-        logAuthLine(app, "warn", "AUTH_VERIFY_RATE_LIMITED", MSG_RATE_LIMITED, ip, phone, route);
-        return reply.header("Retry-After", String(BLOCK_TTL_SEC)).code(429).send({
-          success: false,
-          message: MSG_RATE_LIMITED,
-          blockExpiresAt: nowUnixSec() + BLOCK_TTL_SEC,
-        });
-      }
-
+      const limited = await applyVerifyLimits();
+      if (limited) return limited;
       logAuthLine(app, "warn", "AUTH_VERIFY_WRONG_CODE", MSG_PIN_INVALID, ip, phone, route);
       return reply.code(400).send({ success: false, message: MSG_PIN_INVALID });
     }
@@ -231,6 +266,10 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
     await deleteOtp(phone);
     await resetOtpRateLimitsForIpAndPhone(ip, phone);
     logAuthLine(app, "info", "AUTH_VERIFY_SUCCESS", MSG_PIN_CONFIRMED, ip, phone, route);
-    return reply.code(200).send({ success: true, message: MSG_PIN_CONFIRMED, user });
+    return reply.code(200).send({
+      success: true,
+      message: MSG_PIN_CONFIRMED,
+      user,
+    });
   });
 };

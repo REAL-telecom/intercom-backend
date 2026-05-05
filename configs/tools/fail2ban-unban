@@ -8,7 +8,7 @@ if [ -z "$1" ]; then
 fi
 
 IP=$1
-JAILS=(asterisk auth-combined auth-requests auth-verify sshd)
+JAILS=(asterisk auth sshd)
 
 echo "Разбаниваю IP: $IP"
 for JAIL in "${JAILS[@]}"; do
@@ -22,6 +22,6 @@ done
 echo ""
 echo "Добавляю IP в белый список (ignoreip)..."
 echo "ВАЖНО: Добавьте IP $IP в файл /etc/fail2ban/jail.local в секции:"
-echo "  [sshd], [asterisk], [auth-combined], [auth-requests], [auth-verify]"
+echo "  [sshd], [asterisk], [auth]"
 echo ""
 echo "Затем выполните: sudo fail2ban-client reload"
