@@ -2,13 +2,12 @@ import { redisClient } from "../client";
 
 const getRequestCounterByIpKey = (ip: string) => `otp:request:count:ip:${ip}`;
 const getRequestCounterByPhoneKey = (phone: string) => `otp:request:count:phone:${phone}`;
+const getRequestUniquePhonesByIpKey = (ip: string) => `otp:request:phones:ip:${ip}`;
 const getRequestBlockByIpKey = (ip: string) => `otp:request:block:ip:${ip}`;
-const getRequestBlockByPhoneKey = (phone: string) => `otp:request:block:phone:${phone}`;
 
 const getVerifyCounterByIpKey = (ip: string) => `otp:verify:count:ip:${ip}`;
 const getVerifyCounterByPhoneKey = (phone: string) => `otp:verify:count:phone:${phone}`;
 const getVerifyBlockByIpKey = (ip: string) => `otp:verify:block:ip:${ip}`;
-const getVerifyBlockByPhoneKey = (phone: string) => `otp:verify:block:phone:${phone}`;
 
 const parseCount = (value: string | null): number => {
   if (!value) return 0;
@@ -43,6 +42,33 @@ export const incrementOtpRequestCounterByPhone = async (
     await redisClient.expire(key, ttlSec);
   }
   return count;
+};
+
+/**
+ * Count unique request-code phones seen from one IP in TTL window.
+ * Returns total unique phone count for this IP window.
+ */
+export const incrementOtpRequestUniquePhoneCounterByIp = async (
+  ip: string,
+  phone: string,
+  ttlSec: number
+): Promise<number> => {
+  const key = getRequestUniquePhonesByIpKey(ip);
+  const added = await redisClient.sadd(key, phone);
+  if (added === 1) {
+    const ttl = await redisClient.ttl(key);
+    if (ttl < 0) {
+      await redisClient.expire(key, ttlSec);
+    }
+  }
+  return redisClient.scard(key);
+};
+
+/**
+ * Reset TTL on the phone request-code counter (e.g. on first soft limit) to keep the abuse window anchored.
+ */
+export const refreshOtpRequestCounterByPhoneTTL = async (phone: string, ttlSec: number): Promise<void> => {
+  await redisClient.expire(getRequestCounterByPhoneKey(phone), ttlSec);
 };
 
 /**
@@ -82,24 +108,10 @@ export const blockOtpRequestByIp = async (ip: string, ttlSec: number) => {
 };
 
 /**
- * Set temporary request-code block by phone.
- */
-export const blockOtpRequestByPhone = async (phone: string, ttlSec: number) => {
-  await redisClient.set(getRequestBlockByPhoneKey(phone), "1", "EX", ttlSec);
-};
-
-/**
  * Set temporary verify-code block by IP.
  */
 export const blockOtpVerifyByIp = async (ip: string, ttlSec: number) => {
   await redisClient.set(getVerifyBlockByIpKey(ip), "1", "EX", ttlSec);
-};
-
-/**
- * Set temporary verify-code block by phone.
- */
-export const blockOtpVerifyByPhone = async (phone: string, ttlSec: number) => {
-  await redisClient.set(getVerifyBlockByPhoneKey(phone), "1", "EX", ttlSec);
 };
 
 /**
@@ -111,26 +123,10 @@ export const isOtpRequestBlockedByIp = async (ip: string): Promise<boolean> => {
 };
 
 /**
- * Check whether request-code is blocked by phone.
- */
-export const isOtpRequestBlockedByPhone = async (phone: string): Promise<boolean> => {
-  const value = await redisClient.get(getRequestBlockByPhoneKey(phone));
-  return value === "1";
-};
-
-/**
  * Check whether verify-code is blocked by IP.
  */
 export const isOtpVerifyBlockedByIp = async (ip: string): Promise<boolean> => {
   const value = await redisClient.get(getVerifyBlockByIpKey(ip));
-  return value === "1";
-};
-
-/**
- * Check whether verify-code is blocked by phone.
- */
-export const isOtpVerifyBlockedByPhone = async (phone: string): Promise<boolean> => {
-  const value = await redisClient.get(getVerifyBlockByPhoneKey(phone));
   return value === "1";
 };
 
@@ -172,9 +168,9 @@ export const getOtpVerifyCounterByPhone = async (phone: string): Promise<number>
 export const resetOtpRequestRateLimitsForIpAndPhone = async (ip: string, phone: string) => {
   await redisClient.del(
     getRequestCounterByIpKey(ip),
+    getRequestUniquePhonesByIpKey(ip),
     getRequestCounterByPhoneKey(phone),
     getRequestBlockByIpKey(ip),
-    getRequestBlockByPhoneKey(phone)
   );
 };
 
@@ -186,7 +182,6 @@ export const resetOtpVerifyRateLimitsForIpAndPhone = async (ip: string, phone: s
     getVerifyCounterByIpKey(ip),
     getVerifyCounterByPhoneKey(phone),
     getVerifyBlockByIpKey(ip),
-    getVerifyBlockByPhoneKey(phone)
   );
 };
 

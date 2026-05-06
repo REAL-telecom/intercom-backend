@@ -11,11 +11,13 @@ import {
   getOtpVerifyCounterByIp,
   incrementOtpRequestCounterByIp,
   incrementOtpRequestCounterByPhone,
+  incrementOtpRequestUniquePhoneCounterByIp,
   incrementOtpVerifyCounterByIp,
   incrementOtpVerifyCounterByPhone,
   isOtpCallQueued,
   isOtpRequestBlockedByIp,
   isOtpVerifyBlockedByIp,
+  refreshOtpRequestCounterByPhoneTTL,
   resetOtpRateLimitsForIpAndPhone,
   setOtp,
 } from "../store/redis";
@@ -100,8 +102,22 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
       });
     }
 
+    const uniquePhonesByIp = await incrementOtpRequestUniquePhoneCounterByIp(ip, phone, RATE_LIMIT_TTL);
+    if (uniquePhonesByIp >= RATE_LIMIT_ATTEMPTS) {
+      await Promise.all([
+        blockOtpRequestByIp(ip, RATE_LIMIT_TTL),
+        blockOtpVerifyByIp(ip, RATE_LIMIT_TTL),
+        resetOtpRateLimitsForIpAndPhone(ip, phone),
+      ]);
+      logAuthLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
+      return reply.code(429).send({
+        success: false,
+        message: MSG_IP_BLOCKED,
+      });
+    }
+
     const reqByIp = await incrementOtpRequestCounterByIp(ip, RATE_LIMIT_TTL);
-    if (reqByIp + (await getOtpVerifyCounterByIp(ip)) > IP_LIMIT_ATTEMPTS) {
+    if (reqByIp + (await getOtpVerifyCounterByIp(ip)) >= IP_LIMIT_ATTEMPTS) {
       await Promise.all([
         blockOtpRequestByIp(ip, RATE_LIMIT_TTL),
         blockOtpVerifyByIp(ip, RATE_LIMIT_TTL),
@@ -129,6 +145,9 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
     }
 
     if (reqByPhone >= RATE_LIMIT_ATTEMPTS) {
+      if (reqByPhone === RATE_LIMIT_ATTEMPTS) {
+        await refreshOtpRequestCounterByPhoneTTL(phone, RATE_LIMIT_TTL);
+      }
       logAuthLine(app, "warn", "AUTH_REQ_RATE_LIMITED", MSG_RATE_LIMITED, ip, phone, route);
       return reply.header("Retry-After", String(RATE_LIMIT_TTL)).code(429).send({
         success: false,
