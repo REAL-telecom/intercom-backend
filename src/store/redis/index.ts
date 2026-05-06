@@ -29,6 +29,8 @@ export {
 export type { OtpCallJob } from "./otp/queue";
 
 export {
+  blockOtpRequestByIp,
+  blockOtpVerifyByIp,
   incrementOtpRequestCounter,
   incrementOtpVerifyCounter,
   incrementOtpRequestCounterByIp,
@@ -36,12 +38,11 @@ export {
   incrementOtpRequestUniquePhoneCounterByIp,
   incrementOtpVerifyCounterByIp,
   incrementOtpVerifyCounterByPhone,
-  blockOtpRequestByIp,
-  blockOtpVerifyByIp,
   isOtpRequestBlockedByIp,
   isOtpVerifyBlockedByIp,
   getOtpRequestCounterByIp,
   getOtpRequestCounterByPhone,
+  getOtpRequestUniquePhonesByIp,
   getOtpVerifyCounterByIp,
   getOtpVerifyCounterByPhone,
   refreshOtpRequestCounterByPhoneTTL,

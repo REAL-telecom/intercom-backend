@@ -65,6 +65,13 @@ export const incrementOtpRequestUniquePhoneCounterByIp = async (
 };
 
 /**
+ * Read unique request-code phones seen from one IP in current TTL window.
+ */
+export const getOtpRequestUniquePhonesByIp = async (ip: string): Promise<string[]> => {
+  return redisClient.smembers(getRequestUniquePhonesByIpKey(ip));
+};
+
+/**
  * Reset TTL on the phone request-code counter (e.g. on first soft limit) to keep the abuse window anchored.
  */
 export const refreshOtpRequestCounterByPhoneTTL = async (phone: string, ttlSec: number): Promise<void> => {
