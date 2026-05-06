@@ -26,6 +26,9 @@ import {
 } from "../store/redis";
 
 const OTP_TTL = 300;
+
+const AUTH_REQUESTS_LIMIT_ATTEMPTS = 16;
+
 const PHONE_REQUEST_IP_RATE_LIMIT_TTL = 900;
 const PHONE_REQUEST_IP_LIMIT_ATTEMPTS = 10;
 const PHONE_REQUEST_RATE_LIMIT_TTL = 300;
@@ -136,7 +139,10 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
     }
 
     const reqByIp = await incrementOtpRequestCounterByIp(ip, PHONE_REQUEST_IP_RATE_LIMIT_TTL);
-    if (reqByIp + (await getOtpVerifyCounterByIp(ip)) >= PHONE_REQUEST_IP_LIMIT_ATTEMPTS) {
+    if (
+      reqByIp >= PHONE_REQUEST_IP_LIMIT_ATTEMPTS ||
+      reqByIp + (await getOtpVerifyCounterByIp(ip)) >= AUTH_REQUESTS_LIMIT_ATTEMPTS
+    ) {
       await resetOtpRateLimitsForIpAndPhone(ip, phone);
       await Promise.all([
         blockOtpRequestByIp(ip, PHONE_REQUEST_IP_RATE_LIMIT_TTL),
@@ -240,7 +246,10 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
     }
 
     const verifyByIp = await incrementOtpVerifyCounterByIp(ip, PIN_VERIFY_IP_RATE_LIMIT_TTL);
-    if (verifyByIp + (await getOtpRequestCounterByIp(ip)) >= PIN_VERIFY_IP_LIMIT_ATTEMPTS) {
+    if (
+      verifyByIp >= PIN_VERIFY_IP_LIMIT_ATTEMPTS ||
+      verifyByIp + (await getOtpRequestCounterByIp(ip)) >= AUTH_REQUESTS_LIMIT_ATTEMPTS
+    ) {
       await resetOtpRateLimitsForIpAndPhone(ip, phone);
       await Promise.all([
         blockOtpRequestByIp(ip, PIN_VERIFY_IP_RATE_LIMIT_TTL),
