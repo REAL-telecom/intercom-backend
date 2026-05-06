@@ -184,36 +184,23 @@ export const getOtpVerifyCounterByPhone = async (phone: string): Promise<number>
 };
 
 /**
- * Clear request-code counters and blocks for given IP + phone.
+ * Clear request-code and verify-code rate limits for given phone.
  */
-export const resetOtpRequestRateLimitsForIpAndPhone = async (ip: string, phone: string) => {
+export const resetOtpRateLimitsByPhone = async (phone: string) => {
+  await redisClient.del(getRequestCounterByPhoneKey(phone), getVerifyCounterByPhoneKey(phone));
+};
+
+/**
+ * Clear request-code and verify-code rate limits for given IP.
+ */
+export const resetOtpRateLimitsByIp = async (ip: string) => {
   await redisClient.del(
     getRequestCounterByIpKey(ip),
     getRequestUniquePhonesByIpKey(ip),
-    getRequestCounterByPhoneKey(phone),
     getRequestBlockByIpKey(ip),
-  );
-};
-
-/**
- * Clear verify-code counters and blocks for given IP + phone.
- */
-export const resetOtpVerifyRateLimitsForIpAndPhone = async (ip: string, phone: string) => {
-  await redisClient.del(
     getVerifyCounterByIpKey(ip),
-    getVerifyCounterByPhoneKey(phone),
     getVerifyBlockByIpKey(ip),
   );
-};
-
-/**
- * Clear request-code and verify-code rate limits for given IP + phone.
- */
-export const resetOtpRateLimitsForIpAndPhone = async (ip: string, phone: string) => {
-  await Promise.all([
-    resetOtpRequestRateLimitsForIpAndPhone(ip, phone),
-    resetOtpVerifyRateLimitsForIpAndPhone(ip, phone),
-  ]);
 };
 
 /**

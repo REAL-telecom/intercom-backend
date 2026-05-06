@@ -18,14 +18,14 @@ import {
   isOtpCallQueued,
   isOtpRequestBlockedByIp,
   isOtpVerifyBlockedByIp,
-  resetOtpRateLimitsForIpAndPhone,
-  resetOtpRequestCounterByPhone,
+  resetOtpRateLimitsByIp,
+  resetOtpRateLimitsByPhone,
   resetOtpRequestCounterByPhoneTTL,
   resetOtpVerifyCounterByPhoneTTL,
   setOtp,
 } from "../store/redis";
 
-const AUTH_REQUESTS_LIMIT_ATTEMPTS = 16;
+const AUTH_REQUESTS_LIMIT_ATTEMPTS = 10;
 
 const PHONE_REQUEST_IP_RATE_LIMIT_TTL = 900;
 const PHONE_REQUEST_IP_LIMIT_ATTEMPTS = 10;
@@ -86,6 +86,15 @@ const normalizePhone = (raw: string): string | null => {
  * - POST /auth/verify-code
  */
 export const registerAuthRoutes = async (app: FastifyInstance) => {
+  const applyBlockByIp = async (ip: string, ttlSec: number) => {
+    const phonesByIp = await getOtpRequestUniquePhonesByIp(ip);
+    await Promise.all(
+      phonesByIp.map((phone) => Promise.all([deleteOtp(phone), resetOtpRateLimitsByPhone(phone)]))
+    );
+    await resetOtpRateLimitsByIp(ip);
+    await Promise.all([blockOtpRequestByIp(ip, ttlSec), blockOtpVerifyByIp(ip, ttlSec)]);
+  };
+
   /**
    * Generate 5-digit code, store it in Redis with TTL, and enqueue OTP call.
    * On success, responses include pinExpiresAt (Unix seconds): deadline after which
@@ -120,17 +129,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
       PHONE_REQUEST_IP_RATE_LIMIT_TTL
     );
     if (uniquePhonesByIp >= PHONE_REQUEST_LIMIT_ATTEMPTS) {
-      const phonesByIp = await getOtpRequestUniquePhonesByIp(ip);
-      await Promise.all(
-        phonesByIp.map((phoneInSet) =>
-          Promise.all([deleteOtp(phoneInSet), resetOtpRequestCounterByPhone(phoneInSet)])
-        )
-      );
-      await resetOtpRateLimitsForIpAndPhone(ip, phone);
-      await Promise.all([
-        blockOtpRequestByIp(ip, PHONE_REQUEST_IP_RATE_LIMIT_TTL),
-        blockOtpVerifyByIp(ip, PHONE_REQUEST_IP_RATE_LIMIT_TTL),
-      ]);
+      await applyBlockByIp(ip, PHONE_REQUEST_IP_RATE_LIMIT_TTL);
       logAuthLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
       return reply.code(429).send({
         success: false,
@@ -143,11 +142,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
       reqByIp >= PHONE_REQUEST_IP_LIMIT_ATTEMPTS ||
       reqByIp + (await getOtpVerifyCounterByIp(ip)) >= AUTH_REQUESTS_LIMIT_ATTEMPTS
     ) {
-      await resetOtpRateLimitsForIpAndPhone(ip, phone);
-      await Promise.all([
-        blockOtpRequestByIp(ip, PHONE_REQUEST_IP_RATE_LIMIT_TTL),
-        blockOtpVerifyByIp(ip, PHONE_REQUEST_IP_RATE_LIMIT_TTL),
-      ]);
+      await applyBlockByIp(ip, PHONE_REQUEST_IP_RATE_LIMIT_TTL);
       logAuthLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
       return reply.code(429).send({
         success: false,
@@ -157,11 +152,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
 
     const reqByPhone = await incrementOtpRequestCounterByPhone(phone, PHONE_REQUEST_RATE_LIMIT_TTL);
     if (reqByPhone >= PHONE_REQUEST_IP_LIMIT_ATTEMPTS) {
-      await resetOtpRateLimitsForIpAndPhone(ip, phone);
-      await Promise.all([
-        blockOtpRequestByIp(ip, PHONE_REQUEST_IP_RATE_LIMIT_TTL),
-        blockOtpVerifyByIp(ip, PHONE_REQUEST_IP_RATE_LIMIT_TTL),
-      ]);
+      await applyBlockByIp(ip, PHONE_REQUEST_IP_RATE_LIMIT_TTL);
       logAuthLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
       return reply.code(429).send({
         success: false,
@@ -250,11 +241,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
       verifyByIp >= PIN_VERIFY_IP_LIMIT_ATTEMPTS ||
       verifyByIp + (await getOtpRequestCounterByIp(ip)) >= AUTH_REQUESTS_LIMIT_ATTEMPTS
     ) {
-      await resetOtpRateLimitsForIpAndPhone(ip, phone);
-      await Promise.all([
-        blockOtpRequestByIp(ip, PIN_VERIFY_IP_RATE_LIMIT_TTL),
-        blockOtpVerifyByIp(ip, PIN_VERIFY_IP_RATE_LIMIT_TTL),
-      ]);
+      await applyBlockByIp(ip, PIN_VERIFY_IP_RATE_LIMIT_TTL);
       logAuthLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
       return reply.code(429).send({
         success: false,
@@ -265,11 +252,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
     const verifyByPhone = await incrementOtpVerifyCounterByPhone(phone, PIN_VERIFY_RATE_LIMIT_TTL);
     const applyVerifyLimits = async () => {
       if (verifyByPhone >= PIN_VERIFY_IP_LIMIT_ATTEMPTS) {
-        await resetOtpRateLimitsForIpAndPhone(ip, phone);
-        await Promise.all([
-          blockOtpRequestByIp(ip, PIN_VERIFY_IP_RATE_LIMIT_TTL),
-          blockOtpVerifyByIp(ip, PIN_VERIFY_IP_RATE_LIMIT_TTL),
-        ]);
+        await applyBlockByIp(ip, PIN_VERIFY_IP_RATE_LIMIT_TTL);
         logAuthLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
         return reply.code(429).send({
           success: false,
@@ -314,7 +297,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
 
     const user = await getOrCreateUser(phone);
     await deleteOtp(phone);
-    await resetOtpRateLimitsForIpAndPhone(ip, phone);
+    await Promise.all([resetOtpRateLimitsByPhone(phone), resetOtpRateLimitsByIp(ip)]);
     logAuthLine(app, "info", "AUTH_VERIFY_SUCCESS", MSG_PIN_CONFIRMED, ip, phone, route);
     return reply.code(200).send({
       success: true,
