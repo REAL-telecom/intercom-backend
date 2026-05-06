@@ -45,9 +45,10 @@ export {
   getOtpRequestUniquePhonesByIp,
   getOtpVerifyCounterByIp,
   getOtpVerifyCounterByPhone,
-  refreshOtpRequestCounterByPhoneTTL,
   resetOtpRateLimitsForIpAndPhone,
   resetOtpRequestCounterByPhone,
+  resetOtpRequestCounterByPhoneTTL,
   resetOtpRequestRateLimitsForIpAndPhone,
+  resetOtpVerifyCounterByPhoneTTL,
   resetOtpVerifyRateLimitsForIpAndPhone,
 } from "./otp/limits";

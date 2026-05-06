@@ -81,8 +81,15 @@ export const resetOtpRequestCounterByPhone = async (phone: string): Promise<void
 /**
  * Reset TTL on the phone request-code counter (e.g. on first soft limit) to keep the abuse window anchored.
  */
-export const refreshOtpRequestCounterByPhoneTTL = async (phone: string, ttlSec: number): Promise<void> => {
+export const resetOtpRequestCounterByPhoneTTL = async (phone: string, ttlSec: number): Promise<void> => {
   await redisClient.expire(getRequestCounterByPhoneKey(phone), ttlSec);
+};
+
+/**
+ * Reset TTL on the phone verify-code counter.
+ */
+export const resetOtpVerifyCounterByPhoneTTL = async (phone: string, ttlSec: number): Promise<void> => {
+  await redisClient.expire(getVerifyCounterByPhoneKey(phone), ttlSec);
 };
 
 /**
