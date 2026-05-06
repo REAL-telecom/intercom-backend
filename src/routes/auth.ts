@@ -20,6 +20,7 @@ import {
   isOtpVerifyBlockedByIp,
   refreshOtpRequestCounterByPhoneTTL,
   resetOtpRateLimitsForIpAndPhone,
+  resetOtpRequestCounterByPhone,
   setOtp,
 } from "../store/redis";
 
@@ -107,7 +108,11 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
     const uniquePhonesByIp = await incrementOtpRequestUniquePhoneCounterByIp(ip, phone, IP_RATE_LIMIT_TTL);
     if (uniquePhonesByIp >= PHONE_LIMIT_ATTEMPTS) {
       const phonesByIp = await getOtpRequestUniquePhonesByIp(ip);
-      await Promise.all(phonesByIp.map((phoneInSet) => deleteOtp(phoneInSet)));
+      await Promise.all(
+        phonesByIp.map((phoneInSet) =>
+          Promise.all([deleteOtp(phoneInSet), resetOtpRequestCounterByPhone(phoneInSet)])
+        )
+      );
       await resetOtpRateLimitsForIpAndPhone(ip, phone);
       await Promise.all([
         blockOtpRequestByIp(ip, IP_RATE_LIMIT_TTL),

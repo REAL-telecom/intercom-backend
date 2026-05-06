@@ -72,6 +72,13 @@ export const getOtpRequestUniquePhonesByIp = async (ip: string): Promise<string[
 };
 
 /**
+ * Remove request-code counter by phone.
+ */
+export const resetOtpRequestCounterByPhone = async (phone: string): Promise<void> => {
+  await redisClient.del(getRequestCounterByPhoneKey(phone));
+};
+
+/**
  * Reset TTL on the phone request-code counter (e.g. on first soft limit) to keep the abuse window anchored.
  */
 export const refreshOtpRequestCounterByPhoneTTL = async (phone: string, ttlSec: number): Promise<void> => {
