@@ -9,15 +9,12 @@ import type { RegisterBody } from "../types";
  */
 export const registerPushRoutes = async (app: FastifyInstance) => {
   app.post<{ Body: RegisterBody }>("/push/register", async (request) => {
-    const { userId, pushToken, platform, deviceId } = request.body;
+    const { userId, pushToken, platform } = request.body;
     if (!userId || !pushToken || !platform) {
       return app.httpErrors.badRequest("Missing required fields");
     }
 
-    const payload = deviceId
-      ? { userId, pushToken, platform, deviceId }
-      : { userId, pushToken, platform };
-    await savePushToken(payload);
+    await savePushToken({ userId, pushToken, platform });
     return { ok: true };
   });
 };

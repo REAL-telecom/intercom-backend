@@ -53,7 +53,6 @@ export type RegisterBody = {
   userId: number;
   pushToken: string;
   platform: string;
-  deviceId?: string;
 };
 
 /** FCM data message payload for incoming call push. */

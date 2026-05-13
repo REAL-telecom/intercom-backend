@@ -124,7 +124,6 @@ export const createDatabaseSchema = async () => {
       user_id INTEGER REFERENCES users(id),
       push_token TEXT NOT NULL,
       platform TEXT NOT NULL,
-      device_id TEXT,
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW(),
       UNIQUE (user_id, push_token)
@@ -139,17 +138,16 @@ export const savePushToken = async (params: {
   userId: number;
   pushToken: string;
   platform: string;
-  deviceId?: string;
 }) => {
-  const { userId, pushToken, platform, deviceId } = params;
+  const { userId, pushToken, platform } = params;
   await pool.query(
     `
-    INSERT INTO push_tokens (user_id, push_token, platform, device_id)
-    VALUES ($1, $2, $3, $4)
+    INSERT INTO push_tokens (user_id, push_token, platform)
+    VALUES ($1, $2, $3)
     ON CONFLICT (user_id, push_token)
-    DO UPDATE SET platform = EXCLUDED.platform, device_id = EXCLUDED.device_id, updated_at = NOW();
+    DO UPDATE SET platform = EXCLUDED.platform, updated_at = NOW();
     `,
-    [userId, pushToken, platform, deviceId ?? null]
+    [userId, pushToken, platform]
   );
 };
 
