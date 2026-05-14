@@ -97,6 +97,9 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
 
   /**
    * Generate 5-digit code, store it in Redis with TTL, and enqueue OTP call.
+   * If a code already exists and the phone is not in the Redis call queue, enqueues
+   * another outbound call with the same code (repeat dial after client cooldown).
+   * If the phone is still in the queue, returns "queued" without a second enqueue.
    * On success, responses include pinExpiresAt (Unix seconds): deadline after which
    * the current OTP for this phone is no longer valid (aligned with Redis OTP TTL).
    */
@@ -173,7 +176,10 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
     }
 
     const existingCode = await getOtp(phone);
-    if (existingCode || (await isOtpCallQueued(phone))) {
+    const callQueuedInRedis = await isOtpCallQueued(phone);
+
+    // Задача ещё в Redis-очереди: воркер не забрал — второй RPUSH не делаем.
+    if (callQueuedInRedis) {
       if (existingCode) {
         await setOtp(phone, existingCode, OTP_TTL);
       }
@@ -181,6 +187,28 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
       return reply.code(200).send({
         success: true,
         message: MSG_REQUEST_QUEUED,
+        nextRequestAvailableAt: nowUnixSec() + 60,
+        pinExpiresAt: nowUnixSec() + OTP_TTL,
+      });
+    }
+
+    // Код есть, в очереди задачи нет (воркер уже взял job): повторный originate с тем же OTP.
+    if (existingCode) {
+      await setOtp(phone, existingCode, OTP_TTL);
+      const enqueued = await enqueueOtpCall({ phone, ip });
+      if (!enqueued) {
+        logAuthLine(app, "info", "AUTH_REQ_QUEUED", MSG_REQUEST_QUEUED, ip, phone, route);
+        return reply.code(200).send({
+          success: true,
+          message: MSG_REQUEST_QUEUED,
+          nextRequestAvailableAt: nowUnixSec() + 60,
+          pinExpiresAt: nowUnixSec() + OTP_TTL,
+        });
+      }
+      logAuthLine(app, "info", "AUTH_REQ_ACCEPTED", MSG_REQUEST_ACCEPTED, ip, phone, route);
+      return reply.code(200).send({
+        success: true,
+        message: MSG_REQUEST_ACCEPTED,
         nextRequestAvailableAt: nowUnixSec() + 60,
         pinExpiresAt: nowUnixSec() + OTP_TTL,
       });
