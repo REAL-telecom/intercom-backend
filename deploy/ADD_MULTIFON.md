@@ -127,7 +127,7 @@ sudo asterisk -rx "pjsip show registrations ${MULTIFON_PHONE}"
 
 Ожидается **Registered** для `multifon-registration`.
 
-**Опциональные проверки (убедиться, что данные загрузились):`**
+**Опциональные проверки (убедиться, что данные загрузились):**
 
 ```bash
 sudo asterisk -rx "pjsip show endpoint multifon"

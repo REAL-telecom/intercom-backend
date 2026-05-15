@@ -185,6 +185,40 @@ export const addAddress = async (params: {
   return row;
 };
 
+/**
+ * Load address by id.
+ * Returns null when no address exists for this id.
+ */
+export const getAddressById = async (addressId: number): Promise<AddressRecord | null> => {
+  const result = await pool.query<AddressRecord>(
+    `
+    SELECT id, street, house, building, letter, structure
+    FROM addresses
+    WHERE id = $1
+    LIMIT 1
+    `,
+    [addressId]
+  );
+  return result.rows[0] ?? null;
+};
+
+/**
+ * Format address record for FCM/UI (house only, no apartment).
+ */
+export const formatAddress = (record: AddressRecord): string => {
+  const parts = [`${record.street}, д. ${record.house}`];
+  if (record.building) {
+    parts.push(`корп. ${record.building}`);
+  }
+  if (record.letter) {
+    parts.push(`лит. ${record.letter}`);
+  }
+  if (record.structure) {
+    parts.push(`стр. ${record.structure}`);
+  }
+  return parts.join(", ");
+};
+
 export type PanelRecord = {
   id: number;
   ip: string;

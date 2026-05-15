@@ -22,6 +22,8 @@ import {
 import {
   getPushTokens,
   deletePushTokens,
+  getAddressById,
+  formatAddress,
   getPanel,
   getUser,
   createTempSipEndpoint,
@@ -330,6 +332,12 @@ connectAriEvents(async (event) => {
         if (!panel) {
           app.log.warn({ callId, panelIp }, "Panel is not configured in DB");
         } else {
+          const addressRecord = await getAddressById(panel.address_id);
+          if (!addressRecord) {
+            app.log.warn({ callId, panelIp, addressId: panel.address_id }, "Address not found for panel");
+          } else {
+            address = formatAddress(addressRecord);
+          }
           const user = await getUser(panel.address_id, apartment);
           if (!user) {
             app.log.warn({ callId, panelIp, addressId: panel.address_id, apartment }, "User not found by address/apartment");
