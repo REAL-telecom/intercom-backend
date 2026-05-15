@@ -99,3 +99,13 @@ docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
 SELECT id, ip, address_id FROM panels WHERE ip = '${TEST_PANEL_IP}'::inet;
 "
 ```
+
+### 8) Смена IP тестовой панели (id = 1)
+
+```bash
+cd /opt/intercom-backend && docker compose exec -T postgres psql -U postgres -d intercom -c "
+UPDATE panels
+SET ip = '176.100.119.201'::inet, updated_at = NOW()
+WHERE id = 1;
+"
+```
