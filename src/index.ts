@@ -17,6 +17,7 @@ import {
   originateCall,
   getBridge,
   deleteBridge,
+  deleteEndpoint,
   continueInDialplan,
 } from "./ari/client";
 import {
@@ -606,6 +607,35 @@ connectAriEvents(async (event) => {
       if (callData.domophoneEndpointId) {
         await clearActiveIncomingFromPanel(callData.domophoneEndpointId);
       }
+
+      // Temporary inc_/out_: bridge is gone, endpoint will never be reused.
+      if (callData.endpointId) {
+        let deleted = true;
+        try {
+          await deleteTempSipEndpoint(callData.endpointId);
+        } catch (err) {
+          deleted = false;
+          app.log.warn(
+            { err, callId, endpointId: callData.endpointId, channelId },
+            "StasisEnd: failed to delete temporary SIP endpoint from PostgreSQL"
+          );
+        }
+        try {
+          await deleteEndpoint(callData.endpointId);
+        } catch (err) {
+          deleted = false;
+          app.log.warn(
+            { err, callId, endpointId: callData.endpointId, channelId },
+            "StasisEnd: failed to delete temporary SIP endpoint from ARI"
+          );
+        }
+        if (deleted) {
+          app.log.debug(
+            { callId, endpointId: callData.endpointId, channelId },
+            "StasisEnd: temporary SIP endpoint removed"
+          );
+        }
+      }
     }
 
     // Redis will cleanup session data automatically by TTL
@@ -617,38 +647,40 @@ app.get("/health", async () => {
 });
 
 /**
- * Cleanup temporary endpoints from PostgreSQL if Redis TTL expired.
- * Redis cleans up data automatically by TTL; here we only clean up PostgreSQL.
+ * Cleanup temporary endpoints if Redis TTL expired.
+ * Redis cleans up data automatically by TTL; here we remove leftover Postgres rows and ARI objects.
  */
 const cleanupStaleEndpoints = async () => {
   try {
     const endpointIds = await getTempSipEndpoints();
     for (const endpointId of endpointIds) {
       const session = await getEndpointSession<{ type: "incoming" | "outgoing" }>(endpointId);
-      if (!session) {
-        try {
-          await deleteTempSipEndpoint(endpointId);
-          app.log.debug({ endpointId }, "Cleaned up stale endpoint from PostgreSQL");
-        } catch (error) {
-          app.log.warn({ err: error, endpointId }, "Failed to delete stale endpoint from PostgreSQL");
-        }
+      const callId = getCallIdByEndpointId(endpointId);
+      const callData = callId ? await getCallData<CallData>(callId) : null;
+
+      if (session && callData) {
         continue;
       }
 
-      const callId = getCallIdByEndpointId(endpointId);
-      if (!callId) continue;
-      const callData = await getCallData<CallData>(callId);
-      if (!callData) {
-        try {
-          await deleteTempSipEndpoint(endpointId);
-          app.log.debug({ endpointId }, "Cleaned up endpoint after call data expired");
-        } catch (error) {
-          app.log.warn({ err: error, endpointId }, "Failed to delete endpoint from PostgreSQL");
-        }
+      let deleted = true;
+      try {
+        await deleteTempSipEndpoint(endpointId);
+      } catch (error) {
+        deleted = false;
+        app.log.warn({ err: error, endpointId }, "Cleanup: failed to delete stale endpoint from PostgreSQL");
+      }
+      try {
+        await deleteEndpoint(endpointId);
+      } catch (error) {
+        deleted = false;
+        app.log.warn({ err: error, endpointId }, "Cleanup: failed to delete stale endpoint from ARI");
+      }
+      if (deleted) {
+        app.log.debug({ endpointId }, "Cleanup: cleaned up stale endpoint");
       }
     }
   } catch (error) {
-    app.log.warn({ err: error }, "Failed to cleanup stale endpoints");
+    app.log.warn({ err: error }, "Cleanup: failed to cleanup stale endpoints");
   }
 };
 

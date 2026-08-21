@@ -240,6 +240,27 @@ export const getBridge = async (bridgeId: string) => {
 };
 
 /**
+ * Delete PJSIP endpoint from Asterisk. Missing endpoint is ignored.
+ */
+export const deleteEndpoint = async (endpointId: string) => {
+  const objectTypes = ["endpoint", "auth", "aor"] as const;
+  for (const objectType of objectTypes) {
+    const path = `/asterisk/config/dynamic/res_pjsip/${objectType}/${encodeURIComponent(endpointId)}`;
+    const res = await fetch(`${buildBaseUrl()}${path}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: buildAuthHeader(),
+      },
+    });
+    if (res.ok || res.status === 404) {
+      continue;
+    }
+    const text = await res.text();
+    throw new Error(`ARI delete ${objectType} ${endpointId} failed: ${res.status} ${text}`);
+  }
+};
+
+/**
  * Subscribe ARI application to endpoint events.
  * Required to receive EndpointStateChange events.
  * Subscribes to all PJSIP endpoints.
