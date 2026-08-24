@@ -21,7 +21,7 @@ import {
   continueInDialplan,
 } from "./ari/client";
 import {
-  getPushTokens,
+  getPushTokenRecords,
   deletePushTokens,
   getAddressById,
   formatAddress,
@@ -47,6 +47,7 @@ import {
   clearActiveIncomingFromPanel,
 } from "./store/redis";
 import { sendFcmPush, sendFcmCallEnded } from "./push/fcm";
+import { sendApnsVoipPush, sendApnsVoipCallEnded } from "./push/apns";
 import crypto from "crypto";
 
 import type { ChannelSession, CallData } from "./types";
@@ -430,28 +431,54 @@ connectAriEvents(async (event) => {
       if (userId === null) {
         app.log.warn({ callId, domophoneEndpointId, panelIp, apartment }, "No user mapping for incoming call, skipping push");
       } else {
-        const tokens = await getPushTokens(userId);
-        app.log.info({ tokensCount: tokens.length, userId }, "Push tokens retrieved");
-        if (tokens.length === 0) {
+        const records = await getPushTokenRecords(userId);
+        app.log.info({ tokensCount: records.length, userId }, "Push tokens retrieved");
+        if (records.length === 0) {
           app.log.warn({ userId }, "No push tokens for user");
         } else {
+        const androidTokens = records.filter((r) => r.platform !== "ios_voip").map((r) => r.pushToken);
+        const iosVoipTokens = records.filter((r) => r.platform === "ios_voip").map((r) => r.pushToken);
         const sipCredentials = { username: sipUsername, password: sipPassword, domain: env.serverDomain };
-        app.log.info({ callId, tokensCount: tokens.length }, "Sending FCM push (call, data-only)");
+        const callPayload = {
+          type: "SIP_CALL" as const,
+          callId,
+          sipCredentials: JSON.stringify(sipCredentials),
+          ...(address ? { address } : {}),
+        };
+        const invalidTokens: string[] = [];
+        let fcmInvalidCount = 0;
+        let apnsInvalidCount = 0;
+        if (androidTokens.length > 0) {
+        app.log.info({ callId, tokensCount: androidTokens.length }, "Sending FCM push (call, data-only)");
         try {
-          const { invalidTokens } = await sendFcmPush(tokens, {
-            type: "SIP_CALL",
-            callId,
-            sipCredentials: JSON.stringify(sipCredentials),
-            ...(address ? { address } : {}),
-          });
-          if (invalidTokens.length > 0) {
-            await deletePushTokens(userId, invalidTokens);
-            app.log.info({ callId, userId, removedCount: invalidTokens.length }, "Removed invalid FCM tokens from DB");
-          }
-          app.log.info({ callId, tokensCount: tokens.length }, "FCM push (call) sent");
+          const { invalidTokens: fcmInvalid } = await sendFcmPush(androidTokens, callPayload);
+          fcmInvalidCount = fcmInvalid.length;
+          invalidTokens.push(...fcmInvalid);
+          app.log.info({ callId, tokensCount: androidTokens.length }, "FCM push (call) sent");
         } catch (pushError) {
           app.log.error({ err: pushError, callId }, "FCM push failed, continuing call setup (timeout will still run)");
         }
+        }
+        if (iosVoipTokens.length > 0) {
+        app.log.info({ callId, tokensCount: iosVoipTokens.length }, "Sending APNs VoIP push (call)");
+        try {
+          const { invalidTokens: apnsInvalid } = await sendApnsVoipPush(iosVoipTokens, callPayload);
+          apnsInvalidCount = apnsInvalid.length;
+          invalidTokens.push(...apnsInvalid);
+          app.log.info({ callId, tokensCount: iosVoipTokens.length }, "APNs VoIP push (call) sent");
+        } catch (pushError) {
+          app.log.error({ err: pushError, callId }, "APNs VoIP push failed, continuing call setup (timeout will still run)");
+        }
+        }
+          if (invalidTokens.length > 0) {
+            await deletePushTokens(userId, invalidTokens);
+            if (fcmInvalidCount > 0) {
+              app.log.info({ callId, userId, removedCount: fcmInvalidCount }, "Removed invalid FCM tokens from DB");
+            }
+            if (apnsInvalidCount > 0) {
+              app.log.info({ callId, userId, removedCount: apnsInvalidCount }, "Removed invalid APNs tokens from DB");
+            }
+          }
         }
       }
 
@@ -589,15 +616,45 @@ connectAriEvents(async (event) => {
           if (userId === null) {
             app.log.warn({ callId, domophoneEndpointId: callData.domophoneEndpointId, panelIp: callData.panelIp, apartment: callData.apartment }, "No user mapping for call-ended push, skipping push");
           } else {
-            const tokens = await getPushTokens(userId);
-            if (tokens.length > 0) {
-            app.log.info({ callId, reason, tokensCount: tokens.length }, "Sending FCM call-ended push");
-            const { invalidTokens } = await sendFcmCallEnded(tokens, { type: "SIP_CALL_ENDED", callId, address, reason });
+            const records = await getPushTokenRecords(userId);
+            if (records.length > 0) {
+            const androidTokens = records.filter((r) => r.platform !== "ios_voip").map((r) => r.pushToken);
+            const iosVoipTokens = records.filter((r) => r.platform === "ios_voip").map((r) => r.pushToken);
+            const endedPayload = { type: "SIP_CALL_ENDED" as const, callId, address, reason };
+            const invalidTokens: string[] = [];
+            let fcmInvalidCount = 0;
+            let apnsInvalidCount = 0;
+            if (androidTokens.length > 0) {
+            app.log.info({ callId, reason, tokensCount: androidTokens.length }, "Sending FCM call-ended push");
+            try {
+            const { invalidTokens: fcmInvalid } = await sendFcmCallEnded(androidTokens, endedPayload);
+            fcmInvalidCount = fcmInvalid.length;
+            invalidTokens.push(...fcmInvalid);
+            app.log.info({ callId }, "FCM call-ended push sent");
+            } catch (fcmError) {
+              app.log.warn({ err: fcmError, callId }, "Failed to send FCM call-ended push");
+            }
+            }
+            if (iosVoipTokens.length > 0) {
+            app.log.info({ callId, reason, tokensCount: iosVoipTokens.length }, "Sending APNs VoIP call-ended push");
+            try {
+            const { invalidTokens: apnsInvalid } = await sendApnsVoipCallEnded(iosVoipTokens, endedPayload);
+            apnsInvalidCount = apnsInvalid.length;
+            invalidTokens.push(...apnsInvalid);
+            app.log.info({ callId }, "APNs VoIP call-ended push sent");
+            } catch (apnsError) {
+              app.log.warn({ err: apnsError, callId }, "Failed to send APNs VoIP call-ended push");
+            }
+            }
             if (invalidTokens.length > 0) {
               await deletePushTokens(userId, invalidTokens);
-              app.log.info({ callId, userId, removedCount: invalidTokens.length }, "Removed invalid FCM tokens from DB (call-ended)");
+              if (fcmInvalidCount > 0) {
+                app.log.info({ callId, userId, removedCount: fcmInvalidCount }, "Removed invalid FCM tokens from DB (call-ended)");
+              }
+              if (apnsInvalidCount > 0) {
+                app.log.info({ callId, userId, removedCount: apnsInvalidCount }, "Removed invalid APNs tokens from DB (call-ended)");
+              }
             }
-            app.log.info({ callId }, "FCM call-ended push sent");
             }
           }
         } catch (error) {

@@ -38,4 +38,11 @@ export const env = {
     password: requireEnv("POSTGRES_PASSWORD"),
   },
   firebaseServiceAccountPath: process.env.FIREBASE_SERVICE_ACCOUNT_PATH || "",
+  apns: {
+    keyPath: process.env.APNS_KEY_PATH ?? "",
+    keyId: process.env.APNS_KEY_ID ?? "",
+    teamId: process.env.APNS_TEAM_ID ?? "",
+    bundleId: process.env.APNS_BUNDLE_ID ?? "",
+    environment: process.env.APNS_ENVIRONMENT ?? "",
+  },
 };

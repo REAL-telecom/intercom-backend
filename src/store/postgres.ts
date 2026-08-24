@@ -1,6 +1,8 @@
 import { Pool } from "pg";
 import { env } from "../config/env";
 
+import type { PushTokenRecord } from "../types";
+
 const pool = new Pool({
   host: env.postgres.host,
   port: env.postgres.port,
@@ -290,14 +292,19 @@ export const getUser = async (
 };
 
 /**
- * Load all push tokens for a user.
+ * Load push token records (token + platform) for a user.
  */
-export const getPushTokens = async (userId: number | string) => {
-  const result = await pool.query(
-    `SELECT push_token FROM push_tokens WHERE user_id = $1`,
+export const getPushTokenRecords = async (
+  userId: number | string
+): Promise<PushTokenRecord[]> => {
+  const result = await pool.query<{ push_token: string; platform: string }>(
+    `SELECT push_token, platform FROM push_tokens WHERE user_id = $1`,
     [userId]
   );
-  return result.rows.map((row: { push_token: string }) => row.push_token);
+  return result.rows.map((row) => ({
+    pushToken: row.push_token,
+    platform: row.platform,
+  }));
 };
 
 /**
