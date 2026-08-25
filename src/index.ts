@@ -116,6 +116,39 @@ subscribeToEndpointEvents()
     app.log.error({ err: error }, "Failed to subscribe to endpoint events");
   });
 
+type TempEndpointSession = { type: "incoming" | "outgoing"; registered?: boolean };
+
+const isTempClientEndpoint = (resource?: string) =>
+  Boolean(resource?.startsWith("inc_") || resource?.startsWith("out_"));
+
+const removeTemporarySipEndpoint = async (
+  endpointId: string,
+  logCtx: Record<string, unknown>
+) => {
+  let deleted = true;
+  try {
+    await deleteTempSipEndpoint(endpointId);
+  } catch (err) {
+    deleted = false;
+    app.log.warn(
+      { err, endpointId, ...logCtx },
+      "Failed to delete temporary SIP endpoint from PostgreSQL"
+    );
+  }
+  try {
+    await deleteEndpoint(endpointId);
+  } catch (err) {
+    deleted = false;
+    app.log.warn(
+      { err, endpointId, ...logCtx },
+      "Failed to delete temporary SIP endpoint from ARI"
+    );
+  }
+  if (deleted) {
+    app.log.debug({ endpointId, ...logCtx }, "Temporary SIP endpoint removed");
+  }
+};
+
 connectAriEvents(async (event) => {
   // Log all events for debugging
   app.log.info({ eventType: event.type, fullEvent: JSON.stringify(event, null, 2) }, "ARI event received");
@@ -136,8 +169,8 @@ connectAriEvents(async (event) => {
     if (typeof ep === "object" && ep !== null) {
       const endpoint = ep as { technology?: string; resource?: string; state?: string; channel_ids?: string[]; [key: string]: any };
       
-      if (endpoint.technology === "PJSIP" && endpoint.resource?.startsWith("inc_")) {
-        const endpointId = endpoint.resource;
+      if (endpoint.technology === "PJSIP" && isTempClientEndpoint(endpoint.resource)) {
+        const endpointId = endpoint.resource as string;
         const state = endpoint.state ?? null;
 
         app.log.info({ 
@@ -148,34 +181,49 @@ connectAriEvents(async (event) => {
           allEndpointFields: endpoint
         }, "EndpointStateChange received for temporary endpoint - ALL DATA");
 
-        // Check if there's a pending originate for this endpoint
-        const pending = await getPendingOriginate<{ bridgeId: string; channelId: string }>(
-          endpointId
-        );
-
-        if (pending) {
-          // Only attempt originate if endpoint is online or not offline
-          // Skip if endpoint is offline - it's not registered yet
-          if (state === "offline" || state === "unknown") {
-            app.log.debug({ endpointId, state, bridgeId: pending.bridgeId }, "Skipping originate - endpoint is not online yet");
-            return;
+        if (state === "online") {
+          const session = await getEndpointSession<TempEndpointSession>(endpointId);
+          if (session && !session.registered) {
+            await setEndpointSession(
+              endpointId,
+              { ...session, registered: true },
+              env.callTokenTtlSec
+            );
           }
+        }
 
-          app.log.info({ endpointId, state, bridgeId: pending.bridgeId }, "Found pending originate, attempting to originate");
-          // Try to originate only if endpoint is online
-          // This prevents multiple failed attempts when endpoint is offline
-          try {
-            const appArgs = `outgoing,${pending.bridgeId}`;
-            await originateCall(`PJSIP/${endpointId}`, appArgs);
-            await deletePendingOriginate(endpointId);
-            app.log.info({ endpointId, bridgeId: pending.bridgeId, state }, "Originated call after endpoint state change");
-          } catch (error) {
-            // If originate fails, endpoint might not be fully registered yet
-            // Will retry on next state change event (similar to how Linphone SDK retries)
-            app.log.warn({ err: error, endpointId, state }, "Failed to originate on state change, will retry on next event");
+        // Incoming only: originate into the bridge once the phone has REGISTER'd.
+        if (endpointId.startsWith("inc_")) {
+          const pending = await getPendingOriginate<{ bridgeId: string; channelId: string }>(
+            endpointId
+          );
+
+          if (pending) {
+            if (state === "offline" || state === "unknown") {
+              app.log.debug({ endpointId, state, bridgeId: pending.bridgeId }, "Skipping originate - endpoint is not online yet");
+            } else {
+              app.log.info({ endpointId, state, bridgeId: pending.bridgeId }, "Found pending originate, attempting to originate");
+              try {
+                const appArgs = `outgoing,${pending.bridgeId}`;
+                await originateCall(`PJSIP/${endpointId}`, appArgs);
+                await deletePendingOriginate(endpointId);
+                app.log.info({ endpointId, bridgeId: pending.bridgeId, state }, "Originated call after endpoint state change");
+              } catch (error) {
+                app.log.warn({ err: error, endpointId, state }, "Failed to originate on state change, will retry on next event");
+              }
+            }
+          } else {
+            app.log.debug({ endpointId, state }, "No pending originate found for endpoint");
           }
-        } else {
-          app.log.debug({ endpointId, state }, "No pending originate found for endpoint");
+        }
+
+        // Phone un-REGISTER: drop the one-shot endpoint. Skip the initial offline
+        // before the first REGISTER (registered is not set yet).
+        if (state === "offline" || state === "unknown") {
+          const session = await getEndpointSession<TempEndpointSession>(endpointId);
+          if (session?.registered) {
+            await removeTemporarySipEndpoint(endpointId, { reason: "unregister", state });
+          }
         }
       }
     }
@@ -664,35 +712,6 @@ connectAriEvents(async (event) => {
       if (callData.domophoneEndpointId) {
         await clearActiveIncomingFromPanel(callData.domophoneEndpointId);
       }
-
-      // Temporary inc_/out_: bridge is gone, endpoint will never be reused.
-      if (callData.endpointId) {
-        let deleted = true;
-        try {
-          await deleteTempSipEndpoint(callData.endpointId);
-        } catch (err) {
-          deleted = false;
-          app.log.warn(
-            { err, callId, endpointId: callData.endpointId, channelId },
-            "StasisEnd: failed to delete temporary SIP endpoint from PostgreSQL"
-          );
-        }
-        try {
-          await deleteEndpoint(callData.endpointId);
-        } catch (err) {
-          deleted = false;
-          app.log.warn(
-            { err, callId, endpointId: callData.endpointId, channelId },
-            "StasisEnd: failed to delete temporary SIP endpoint from ARI"
-          );
-        }
-        if (deleted) {
-          app.log.debug(
-            { callId, endpointId: callData.endpointId, channelId },
-            "StasisEnd: temporary SIP endpoint removed"
-          );
-        }
-      }
     }
 
     // Redis will cleanup session data automatically by TTL
@@ -719,22 +738,7 @@ const cleanupStaleEndpoints = async () => {
         continue;
       }
 
-      let deleted = true;
-      try {
-        await deleteTempSipEndpoint(endpointId);
-      } catch (error) {
-        deleted = false;
-        app.log.warn({ err: error, endpointId }, "Cleanup: failed to delete stale endpoint from PostgreSQL");
-      }
-      try {
-        await deleteEndpoint(endpointId);
-      } catch (error) {
-        deleted = false;
-        app.log.warn({ err: error, endpointId }, "Cleanup: failed to delete stale endpoint from ARI");
-      }
-      if (deleted) {
-        app.log.debug({ endpointId }, "Cleanup: cleaned up stale endpoint");
-      }
+      await removeTemporarySipEndpoint(endpointId, { reason: "ttl-expired" });
     }
   } catch (error) {
     app.log.warn({ err: error }, "Cleanup: failed to cleanup stale endpoints");

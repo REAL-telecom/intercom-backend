@@ -14,3 +14,5 @@ yarn-error.log
 .env
 
 *-firebase-adminsdk-*.json
+AuthKey_*.p8
+*.p8
