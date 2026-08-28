@@ -63,28 +63,12 @@ export type FcmCallPayload = {
   address?: string;
 };
 
-/** FCM data message payload for "call ended" push. */
-export type FcmCallEndedPayload = {
-  type: "SIP_CALL_ENDED";
-  callId: string;
-  address: string;
-  reason: "timeout" | "caller_hung_up";
-};
-
 /** APNs VoIP payload for incoming call push (flat string values, same keys as FCM data). */
 export type ApnsVoipCallPayload = {
   type: "SIP_CALL";
   callId: string;
   sipCredentials: string;
   address?: string;
-};
-
-/** APNs VoIP payload for "call ended" push. */
-export type ApnsVoipCallEndedPayload = {
-  type: "SIP_CALL_ENDED";
-  callId: string;
-  address: string;
-  reason: "timeout" | "caller_hung_up";
 };
 
 /** Stored push token with platform (android FCM vs ios_voip). */

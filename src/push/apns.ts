@@ -3,7 +3,7 @@ import * as http2 from "http2";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env";
 
-import type { ApnsVoipCallEndedPayload, ApnsVoipCallPayload } from "../types";
+import type { ApnsVoipCallPayload } from "../types";
 
 const JWT_MAX_AGE_MS = 55 * 60 * 1000;
 const JWT_MIN_REISSUE_MS = 20 * 60 * 1000;
@@ -244,22 +244,5 @@ export const sendApnsVoipPush = async (
   if (payload.address != null && payload.address !== "") {
     body.address = payload.address;
   }
-  return sendApns(tokens, body);
-};
-
-/**
- * Send PushKit VoIP "call ended" push.
- * Returns invalid tokens to remove from DB. Does not throw on partial failure.
- */
-export const sendApnsVoipCallEnded = async (
-  tokens: string[],
-  payload: ApnsVoipCallEndedPayload
-): Promise<{ invalidTokens: string[] }> => {
-  const body: Record<string, string> = {
-    type: "SIP_CALL_ENDED",
-    callId: payload.callId,
-    address: payload.address,
-    reason: payload.reason,
-  };
   return sendApns(tokens, body);
 };

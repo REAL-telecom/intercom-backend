@@ -45,8 +45,8 @@ import {
   setActiveIncomingFromPanel,
   clearActiveIncomingFromPanel,
 } from "./store/redis";
-import { sendFcmPush, sendFcmCallEnded } from "./push/fcm";
-import { sendApnsVoipPush, sendApnsVoipCallEnded } from "./push/apns";
+import { sendFcmPush } from "./push/fcm";
+import { sendApnsVoipPush } from "./push/apns";
 import crypto from "crypto";
 
 import type { ChannelSession, CallData } from "./types";
@@ -561,64 +561,6 @@ connectAriEvents(async (event) => {
         }
       }
 
-      if (callData.status === "rejected") {
-        app.log.debug({ callId }, "StasisEnd: skip FCM call-ended (user rejected)");
-      } else if (callData.status === "accepted") {
-        app.log.debug({ callId }, "StasisEnd: skip FCM call-ended (call was accepted, end via SIP only)");
-      } else {
-        const address = callData.address ?? "";
-        const reason: "timeout" | "caller_hung_up" =
-          callData.status === "timeout" ? "timeout" : "caller_hung_up";
-        try {
-          const userId = callData.userId ?? null;
-          if (userId === null) {
-            app.log.warn({ callId, domophoneEndpointId: callData.domophoneEndpointId, panelIp: callData.panelIp, apartment: callData.apartment }, "No user mapping for call-ended push, skipping push");
-          } else {
-            const records = await getPushTokenRecords(userId);
-            if (records.length > 0) {
-            const androidTokens = records.filter((r) => r.platform !== "ios_voip").map((r) => r.pushToken);
-            const iosVoipTokens = records.filter((r) => r.platform === "ios_voip").map((r) => r.pushToken);
-            const endedPayload = { type: "SIP_CALL_ENDED" as const, callId, address, reason };
-            const invalidTokens: string[] = [];
-            let fcmInvalidCount = 0;
-            let apnsInvalidCount = 0;
-            if (androidTokens.length > 0) {
-            app.log.info({ callId, reason, tokensCount: androidTokens.length }, "Sending FCM call-ended push");
-            try {
-            const { invalidTokens: fcmInvalid } = await sendFcmCallEnded(androidTokens, endedPayload);
-            fcmInvalidCount = fcmInvalid.length;
-            invalidTokens.push(...fcmInvalid);
-            app.log.info({ callId }, "FCM call-ended push sent");
-            } catch (fcmError) {
-              app.log.warn({ err: fcmError, callId }, "Failed to send FCM call-ended push");
-            }
-            }
-            if (iosVoipTokens.length > 0) {
-            app.log.info({ callId, reason, tokensCount: iosVoipTokens.length }, "Sending APNs VoIP call-ended push");
-            try {
-            const { invalidTokens: apnsInvalid } = await sendApnsVoipCallEnded(iosVoipTokens, endedPayload);
-            apnsInvalidCount = apnsInvalid.length;
-            invalidTokens.push(...apnsInvalid);
-            app.log.info({ callId }, "APNs VoIP call-ended push sent");
-            } catch (apnsError) {
-              app.log.warn({ err: apnsError, callId }, "Failed to send APNs VoIP call-ended push");
-            }
-            }
-            if (invalidTokens.length > 0) {
-              await deletePushTokens(userId, invalidTokens);
-              if (fcmInvalidCount > 0) {
-                app.log.info({ callId, userId, removedCount: fcmInvalidCount }, "Removed invalid FCM tokens from DB (call-ended)");
-              }
-              if (apnsInvalidCount > 0) {
-                app.log.info({ callId, userId, removedCount: apnsInvalidCount }, "Removed invalid APNs tokens from DB (call-ended)");
-              }
-            }
-            }
-          }
-        } catch (error) {
-          app.log.warn({ err: error, callId }, "Failed to send FCM call-ended push");
-        }
-      }
       if (callData.domophoneEndpointId) {
         await clearActiveIncomingFromPanel(callData.domophoneEndpointId);
       }

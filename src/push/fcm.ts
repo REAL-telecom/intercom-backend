@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as admin from "firebase-admin";
 import { env } from "../config/env";
 
-import type { FcmCallPayload, FcmCallEndedPayload } from "../types";
+import type { FcmCallPayload } from "../types";
 
 let initialized = false;
 
@@ -72,22 +72,5 @@ export const sendFcmPush = async (
   if (payload.address != null && payload.address !== "") {
     data.address = payload.address;
   }
-  return sendFcm(tokens, data);
-};
-
-/**
- * Send data-only FCM "call ended". Returns invalid tokens to remove from DB.
- * reason is sent so the app can log it (only used when not rejected).
- */
-export const sendFcmCallEnded = async (
-  tokens: string[],
-  payload: FcmCallEndedPayload
-): Promise<{ invalidTokens: string[] }> => {
-  const data: Record<string, string> = {
-    type: "SIP_CALL_ENDED",
-    callId: payload.callId,
-    address: payload.address ?? "",
-    reason: payload.reason,
-  };
   return sendFcm(tokens, data);
 };
