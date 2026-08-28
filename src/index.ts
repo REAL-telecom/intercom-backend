@@ -13,7 +13,6 @@ import {
   createBridge,
   addChannelToBridge,
   hangupChannel,
-  subscribeToEndpointEvents,
   originateCall,
   getBridge,
   deleteBridge,
@@ -106,20 +105,7 @@ void startOtpWorker(app).catch((error) => {
 
 app.log.info("Connecting to ARI WebSocket");
 
-// Subscribe to endpoint events to receive EndpointStateChange events
-app.log.info("Subscribing to endpoint events");
-subscribeToEndpointEvents()
-  .then(() => {
-    app.log.info("Successfully subscribed to endpoint events");
-  })
-  .catch((error) => {
-    app.log.error({ err: error }, "Failed to subscribe to endpoint events");
-  });
-
-type TempEndpointSession = { type: "incoming" | "outgoing"; registered?: boolean };
-
-const isTempClientEndpoint = (resource?: string) =>
-  Boolean(resource?.startsWith("inc_") || resource?.startsWith("out_"));
+const INCOMING_MAX_CONTACTS = 8;
 
 const removeTemporarySipEndpoint = async (
   endpointId: string,
@@ -152,83 +138,6 @@ const removeTemporarySipEndpoint = async (
 connectAriEvents(async (event) => {
   // Log all events for debugging
   app.log.info({ eventType: event.type, fullEvent: JSON.stringify(event, null, 2) }, "ARI event received");
-
-  // Handle EndpointStateChange events for temporary endpoints
-  // When endpoint state changes, try to originate if there's a pending call
-  // This works similar to how Linphone SDK detects registration - by attempting to use the endpoint
-  if (event.type === "EndpointStateChange") {
-    // Log complete event with all fields
-    app.log.info({ 
-      fullEvent: JSON.stringify(event, null, 2),
-      eventKeys: Object.keys(event),
-      endpointRaw: event.endpoint
-    }, "EndpointStateChange event - COMPLETE DATA");
-    
-    const ep = event.endpoint;
-    
-    if (typeof ep === "object" && ep !== null) {
-      const endpoint = ep as { technology?: string; resource?: string; state?: string; channel_ids?: string[]; [key: string]: any };
-      
-      if (endpoint.technology === "PJSIP" && isTempClientEndpoint(endpoint.resource)) {
-        const endpointId = endpoint.resource as string;
-        const state = endpoint.state ?? null;
-
-        app.log.info({ 
-          endpointId, 
-          state, 
-          channel_ids: endpoint.channel_ids,
-          fullEndpointData: JSON.stringify(endpoint, null, 2),
-          allEndpointFields: endpoint
-        }, "EndpointStateChange received for temporary endpoint - ALL DATA");
-
-        if (state === "online") {
-          const session = await getEndpointSession<TempEndpointSession>(endpointId);
-          if (session && !session.registered) {
-            await setEndpointSession(
-              endpointId,
-              { ...session, registered: true },
-              env.callTokenTtlSec
-            );
-          }
-        }
-
-        // Incoming only: originate into the bridge once the phone has REGISTER'd.
-        if (endpointId.startsWith("inc_")) {
-          const pending = await getPendingOriginate<{ bridgeId: string; channelId: string }>(
-            endpointId
-          );
-
-          if (pending) {
-            if (state === "offline" || state === "unknown") {
-              app.log.debug({ endpointId, state, bridgeId: pending.bridgeId }, "Skipping originate - endpoint is not online yet");
-            } else {
-              app.log.info({ endpointId, state, bridgeId: pending.bridgeId }, "Found pending originate, attempting to originate");
-              try {
-                const appArgs = `outgoing,${pending.bridgeId}`;
-                await originateCall(`PJSIP/${endpointId}`, appArgs);
-                await deletePendingOriginate(endpointId);
-                app.log.info({ endpointId, bridgeId: pending.bridgeId, state }, "Originated call after endpoint state change");
-              } catch (error) {
-                app.log.warn({ err: error, endpointId, state }, "Failed to originate on state change, will retry on next event");
-              }
-            }
-          } else {
-            app.log.debug({ endpointId, state }, "No pending originate found for endpoint");
-          }
-        }
-
-        // Phone un-REGISTER: drop the one-shot endpoint. Skip the initial offline
-        // before the first REGISTER (registered is not set yet).
-        if (state === "offline" || state === "unknown") {
-          const session = await getEndpointSession<TempEndpointSession>(endpointId);
-          if (session?.registered) {
-            await removeTemporarySipEndpoint(endpointId, { reason: "unregister", state });
-          }
-        }
-      }
-    }
-    return;
-  }
 
   if (event.type === "ChannelDestroyed" && typeof event.channel === "object" && event.channel) {
     const channel = event.channel as { id?: string };
@@ -422,13 +331,14 @@ connectAriEvents(async (event) => {
       const sipUsername = endpointId;
       const sipPassword = crypto.randomBytes(8).toString("hex");
 
-      app.log.info({ endpointId, sipUsername, sipPassword, context: "intercom" }, "Creating temporary SIP endpoint");
+      app.log.info({ endpointId, sipUsername, sipPassword, context: "intercom", maxContacts: INCOMING_MAX_CONTACTS }, "Creating temporary SIP endpoint");
       await createTempSipEndpoint({
-        id: endpointId,
-        username: sipUsername,
-        password: sipPassword,
         context: "intercom",
+        id: endpointId,
+        maxContacts: INCOMING_MAX_CONTACTS,
+        password: sipPassword,
         templateId: "tpl_client",
+        username: sipUsername,
       });
       app.log.info({ endpointId }, "Temporary SIP endpoint created");
       await setEndpointSession(endpointId, { type: "incoming" }, env.callTokenTtlSec);
@@ -748,8 +658,9 @@ const cleanupStaleEndpoints = async () => {
 setInterval(cleanupStaleEndpoints, 60000);
 
 /**
- * Periodically check pending originate requests and try to originate calls.
- * This is a fallback mechanism in case EndpointStateChange events don't arrive in time.
+ * Retry originate until PJSIP has a contact on the temp endpoint.
+ * Do not wait for ARI EndpointStateChange/online: realtime endpoints created
+ * at runtime do not update ARI device state.
  */
 const checkPendingOriginate = async () => {
   try {

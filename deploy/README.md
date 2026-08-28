@@ -22,6 +22,7 @@
 
 ## Прочее
 
+- **[DOMAIN_MIGRATION.md](DOMAIN_MIGRATION.md)** — смена домена на уже развёрнутом сервере (серт, `.env`, Asterisk/TURN, клиенты). Шаблоны с `__SERVER_DOMAIN__` не трогать.
 - **[TEST_BLOCKING_E2E.md](TEST_BLOCKING_E2E.md)** — ручное тестирование rate limits и fail2ban. Не является обязательной частью настройки.
 
 ## См. также

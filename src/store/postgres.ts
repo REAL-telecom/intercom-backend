@@ -323,20 +323,23 @@ export const deletePushTokens = async (userId: number | string, tokens: string[]
  * This endpoint is removed after the call ends.
  */
 export const createTempSipEndpoint = async (params: {
-  id: string;
-  username: string;
-  password: string;
   context: string;
+  id: string;
+  maxContacts?: number;
+  password: string;
   templateId?: string;
+  username: string;
 }) => {
-  const { id, username, password, context, templateId = "tpl_client" } = params;
+  const { context, id, password, username } = params;
+  const maxContacts = params.maxContacts ?? 1;
+  const templateId = params.templateId ?? "tpl_client";
   await pool.query(
     `
     INSERT INTO ps_aors (id, max_contacts)
-    VALUES ($1, 1)
-    ON CONFLICT (id) DO UPDATE SET max_contacts = 1;
+    VALUES ($1, $2)
+    ON CONFLICT (id) DO UPDATE SET max_contacts = EXCLUDED.max_contacts;
     `,
-    [id]
+    [id, maxContacts]
   );
   await pool.query(
     `
