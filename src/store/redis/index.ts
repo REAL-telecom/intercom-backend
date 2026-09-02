@@ -3,6 +3,12 @@ export { redisClient } from "./client";
 export {
   setCallData,
   getCallData,
+  claimCallOutcome,
+  getCallOutcome,
+  addOriginateChannelId,
+  getOriginateChannelIds,
+  claimContactForDial,
+  releaseContactForDial,
   getCallIdByEndpointId,
   setEndpointSession,
   getEndpointSession,
@@ -15,6 +21,8 @@ export {
   getActiveIncomingFromPanel,
   clearActiveIncomingFromPanel,
 } from "./calls";
+
+export type { CallOutcome } from "./calls";
 
 export { setOtp, getOtp, deleteOtp } from "./otp/codes";
 

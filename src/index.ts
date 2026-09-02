@@ -13,7 +13,10 @@ import {
   createBridge,
   addChannelToBridge,
   hangupChannel,
+  hangupChannelIfExists,
   originateCall,
+  getChannel,
+  getChannelVariable,
   getBridge,
   deleteBridge,
   deleteEndpoint,
@@ -36,6 +39,12 @@ import {
   setEndpointSession,
   getEndpointSession,
   getCallData,
+  claimCallOutcome,
+  getCallOutcome,
+  addOriginateChannelId,
+  getOriginateChannelIds,
+  claimContactForDial,
+  releaseContactForDial,
   getCallIdByEndpointId,
   setPendingOriginate,
   getPendingOriginate,
@@ -185,7 +194,32 @@ connectAriEvents(async (event) => {
       : [];
     if (eventArgs[0] === "outgoing") {
       const bridgeId = String(eventArgs[1] ?? "");
+      const endpointIdFromArgs = String(eventArgs[2] ?? "");
+      const callIdForStatus = endpointIdFromArgs ? getCallIdByEndpointId(endpointIdFromArgs) : null;
       if (bridgeId) {
+        if (callIdForStatus) {
+          const claimed = await claimCallOutcome(callIdForStatus, "accepted", env.callTokenTtlSec);
+          if (!claimed) {
+            const outcome = await getCallOutcome(callIdForStatus);
+            if (outcome === "accepted") {
+              await hangupChannelIfExists(channelId, "answered_elsewhere");
+            } else {
+              await hangupChannelIfExists(channelId, "normal");
+            }
+            app.log.info(
+              { channelId, callId: callIdForStatus, outcome },
+              "Outgoing channel lost race or call already ended"
+            );
+            return;
+          }
+          app.log.info({ callId: callIdForStatus }, "Call marked as accepted (timeout will not hang up)");
+        } else {
+          app.log.warn(
+            { channelId, args: event.args },
+            "Could not derive callId from outgoing channel args, skipping outcome claim"
+          );
+        }
+        let connected = false;
         try {
           app.log.info({ channelId, bridgeId }, "Processing outgoing channel - adding to bridge");
           
@@ -219,23 +253,8 @@ connectAriEvents(async (event) => {
                 app.log.info({ domophoneChannelId, bridgeId, allChannels: bridgeInfo.channels }, "Found domophone channel in bridge, answering it");
                 try {
                   await answerChannel(domophoneChannelId);
+                  connected = true;
                   app.log.info({ domophoneChannelId }, "CRITICAL: Answered domophone channel - call should be fully connected now");
-                  const namePart = channel.name?.split("/")[1];
-                  let endpointIdFromChannel: string | null = namePart ?? null;
-                  if (namePart) {
-                    // ARI/Asterisk appends "-<tail>" after our crafted endpoint id in channel.name.
-                    // We strip everything after the last "-" and treat the rest as endpoint id.
-                    const lastHyphen = namePart.lastIndexOf("-");
-                    if (lastHyphen > 0) endpointIdFromChannel = namePart.slice(0, lastHyphen);
-                  }
-                  const callIdForStatus = endpointIdFromChannel ? getCallIdByEndpointId(endpointIdFromChannel) : null;
-                  if (callIdForStatus) {
-                    const callDataAccepted = await getCallData<CallData>(callIdForStatus);
-                    if (callDataAccepted) {
-                      await setCallData(callIdForStatus, { ...callDataAccepted, status: "accepted" }, env.callTokenTtlSec);
-                      app.log.info({ callId: callIdForStatus }, "Call marked as accepted (timeout will not hang up)");
-                    }
-                  }
                 } catch (answerError) {
                   app.log.warn({ err: answerError, domophoneChannelId }, "Failed to answer domophone channel, may already be answered");
                 }
@@ -257,6 +276,41 @@ connectAriEvents(async (event) => {
             app.log.info({ channelId, bridgeId }, "Outgoing channel added to bridge on retry");
           } catch (retryError) {
             app.log.error({ err: retryError, channelId, bridgeId }, "CRITICAL: Retry also failed - call connection failed");
+          }
+        }
+        if (callIdForStatus) {
+          if (connected) {
+            const originateChannelIds = await getOriginateChannelIds(callIdForStatus);
+            for (const originateChannelId of originateChannelIds) {
+              if (originateChannelId === channelId) continue;
+              await hangupChannelIfExists(originateChannelId, "answered_elsewhere");
+            }
+            app.log.info(
+              { callId: callIdForStatus, channelId },
+              "Hung up other originate channels answered elsewhere"
+            );
+          } else {
+            const callData = await getCallData<CallData>(callIdForStatus);
+            const panelChannelId = callData?.channelId;
+            if (panelChannelId) {
+              try {
+                await continueInDialplan(panelChannelId, "from-domophone", "noanswer", 1);
+              } catch (continueError) {
+                app.log.warn(
+                  { err: continueError, channelId: panelChannelId },
+                  "Failed to continueInDialplan panel channel after bridge connect failure"
+                );
+              }
+            }
+            const originateChannelIds = await getOriginateChannelIds(callIdForStatus);
+            for (const originateChannelId of originateChannelIds) {
+              await hangupChannelIfExists(originateChannelId);
+            }
+            await hangupChannelIfExists(channelId);
+            app.log.error(
+              { callId: callIdForStatus, channelId },
+              "Emergency cleanup after failed call connect"
+            );
           }
         }
       } else {
@@ -360,7 +414,6 @@ connectAriEvents(async (event) => {
           {
             channelId,
             endpointId,
-            status: "pending",
             bridgeId: bridge.id,
             userId: userId ?? undefined,
             apartment: apartment ?? undefined,
@@ -446,15 +499,21 @@ connectAriEvents(async (event) => {
         void (async () => {
           try {
             await new Promise((r) => setTimeout(r, env.ringTimeoutSec * 1000));
-            const callData = await getCallData<CallData>(callId);
-            if (!callData || callData.status !== "pending") {
-              app.log.debug({ callId, channelId, bridgeId: capturedBridgeId, status: callData?.status }, "Call already processed, skipping timeout");
+            const outcome = await getCallOutcome(callId);
+            if (outcome !== null) {
+              app.log.debug({ callId, channelId, bridgeId: capturedBridgeId, outcome }, "Call already processed, skipping timeout");
               return;
             }
 
+            const callData = await getCallData<CallData>(callId);
+
             app.log.warn({ callId, channelId, bridgeId: capturedBridgeId, ringTimeoutSec: env.ringTimeoutSec }, "Incoming call timed out - sending domophone to noanswer");
-            await setCallData(callId, { ...callData, status: "timeout" }, env.callTokenTtlSec);
-            if (callData.endpointId) {
+            const claimed = await claimCallOutcome(callId, "timeout", env.callTokenTtlSec);
+            if (!claimed) {
+              app.log.debug({ callId, channelId, bridgeId: capturedBridgeId }, "Call outcome already claimed, skipping timeout");
+              return;
+            }
+            if (callData?.endpointId) {
               try {
                 await deletePendingOriginate(callData.endpointId);
                 app.log.info(
@@ -475,6 +534,12 @@ connectAriEvents(async (event) => {
             } catch (continueError) {
               app.log.warn({ err: continueError, channelId }, "Failed to continueInDialplan timed out channel");
             }
+            const originateChannelIds = await getOriginateChannelIds(callId);
+            for (const originateChannelId of originateChannelIds) {
+              if (await hangupChannelIfExists(originateChannelId)) {
+                app.log.info({ callId, originateChannelId }, "Timed out: hung up originate channel");
+              }
+            }
             try {
               const bridgeInfo = await getBridge(capturedBridgeId);
               if (bridgeInfo?.channels?.length) {
@@ -492,7 +557,7 @@ connectAriEvents(async (event) => {
             } catch (error) {
               app.log.debug({ err: error, bridgeId: capturedBridgeId }, "Bridge already deleted or delete failed");
             }
-            if (callData.domophoneEndpointId) {
+            if (callData?.domophoneEndpointId) {
               await clearActiveIncomingFromPanel(callData.domophoneEndpointId);
             }
           } catch (error) {
@@ -544,7 +609,8 @@ connectAriEvents(async (event) => {
 
     const callId = channelSession?.callId;
     if (callId && callData) {
-      if (callData.status === "pending") {
+      const claimed = await claimCallOutcome(callId, "rejected", env.callTokenTtlSec);
+      if (claimed) {
         if (callData.endpointId) {
           try {
             await deletePendingOriginate(callData.endpointId);
@@ -558,6 +624,13 @@ connectAriEvents(async (event) => {
               "StasisEnd: failed to clear pending originate for ended pending call"
             );
           }
+        }
+      }
+
+      const originateChannelIds = await getOriginateChannelIds(callId);
+      for (const originateChannelId of originateChannelIds) {
+        if (await hangupChannelIfExists(originateChannelId)) {
+          app.log.info({ originateChannelId, channelId, callId }, "StasisEnd: hung up originate channel");
         }
       }
 
@@ -597,12 +670,39 @@ const cleanupStaleEndpoints = async () => {
   }
 };
 
-setInterval(cleanupStaleEndpoints, 60000);
+let isCleaningStaleEndpoints = false;
+setInterval(() => {
+  if (isCleaningStaleEndpoints) {
+    app.log.debug("Cleanup: skipping stale endpoints, previous pass still running");
+    return;
+  }
+  isCleaningStaleEndpoints = true;
+  cleanupStaleEndpoints()
+    .catch((error) => {
+      app.log.error({ err: error }, "Cleanup: failed to cleanup stale endpoints");
+    })
+    .finally(() => {
+      isCleaningStaleEndpoints = false;
+    });
+}, 60000);
+
+/**
+ * Split PJSIP_DIAL_CONTACTS output into ARI originate endpoints.
+ */
+const parseDialContacts = (dialString: string): string[] => {
+  return dialString
+    .split("&")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+};
 
 /**
  * Retry originate until PJSIP has a contact on the temp endpoint.
  * Do not wait for ARI EndpointStateChange/online: realtime endpoints created
  * at runtime do not update ARI device state.
+ * Each pass originates a separate INVITE per PJSIP contact; pending is kept
+ * while the call is still ringing so devices that register later are dialed.
+ * Pending is deleted once the call is answered, rejected, timed out, or the panel channel is gone.
  */
 const checkPendingOriginate = async () => {
   try {
@@ -621,9 +721,10 @@ const checkPendingOriginate = async () => {
         }
 
         const pendingCallData = await getCallData<CallData>(pendingCallId);
+        const pendingOutcome = await getCallOutcome(pendingCallId);
         if (
           !pendingCallData ||
-          pendingCallData.status !== "pending" ||
+          pendingOutcome !== null ||
           pendingCallData.endpointId !== endpointId
         ) {
           await deletePendingOriginate(endpointId);
@@ -631,7 +732,7 @@ const checkPendingOriginate = async () => {
             {
               endpointId,
               callId: pendingCallId,
-              status: pendingCallData?.status,
+              outcome: pendingOutcome,
               actualEndpointId: pendingCallData?.endpointId,
             },
             "Dropped stale pending originate: call is no longer pending"
@@ -640,17 +741,84 @@ const checkPendingOriginate = async () => {
         }
 
         try {
-          app.log.info(
-            { endpointId, bridgeId: pending.bridgeId, time: Date.now() },
-            "ATTEMPTING to originate call to endpoint"
+          const dialString = await getChannelVariable(
+            pending.channelId,
+            `PJSIP_DIAL_CONTACTS(${endpointId})`
           );
-          const appArgs = `outgoing,${pending.bridgeId}`;
-          await originateCall(`PJSIP/${endpointId}`, appArgs);
-          await deletePendingOriginate(endpointId);
-          app.log.info(
-            { endpointId, bridgeId: pending.bridgeId, time: Date.now() },
-            "SUCCESS: Originated call from periodic check"
-          );
+          const dialContacts = parseDialContacts(dialString);
+          if (dialContacts.length === 0) {
+            app.log.debug(
+              { endpointId, channelId: pending.channelId },
+              "No PJSIP contacts yet, keeping pending originate"
+            );
+            continue;
+          }
+
+          const appArgs = `outgoing,${pending.bridgeId},${endpointId}`;
+          for (const dialContact of dialContacts) {
+            if ((await getCallOutcome(pendingCallId)) !== null) {
+              break;
+            }
+            const claimedContact = await claimContactForDial(
+              pendingCallId,
+              dialContact,
+              env.ringTimeoutSec
+            );
+            if (!claimedContact) {
+              continue;
+            }
+            try {
+              app.log.info(
+                { endpointId, bridgeId: pending.bridgeId, contact: dialContact, time: Date.now() },
+                "ATTEMPTING to originate call to endpoint"
+              );
+              const originated = await originateCall(dialContact, appArgs);
+              await addOriginateChannelId(pendingCallId, originated.id, env.callTokenTtlSec);
+              app.log.info(
+                {
+                  endpointId,
+                  bridgeId: pending.bridgeId,
+                  contact: dialContact,
+                  originateChannelId: originated.id,
+                  time: Date.now(),
+                },
+                "SUCCESS: Originated call from periodic check"
+              );
+            } catch (error) {
+              await releaseContactForDial(pendingCallId, dialContact);
+              app.log.warn(
+                {
+                  err: error,
+                  endpointId,
+                  contact: dialContact,
+                },
+                "FAILED: Could not originate call to contact"
+              );
+            }
+          }
+
+          let panelChannelAlive = true;
+          try {
+            await getChannel(pending.channelId);
+          } catch {
+            panelChannelAlive = false;
+          }
+          const outcomeAfterOriginate = await getCallOutcome(pendingCallId);
+          if (outcomeAfterOriginate === "accepted") {
+            // Do not hang up here: the winner hangs up other legs. The outcome
+            // check before originate guarantees every created leg is in the set
+            // before the winner enumerates it.
+            await deletePendingOriginate(endpointId);
+            continue;
+          }
+          if (!panelChannelAlive || outcomeAfterOriginate !== null) {
+            const originateChannelIds = await getOriginateChannelIds(pendingCallId);
+            for (const originatedId of originateChannelIds) {
+              await hangupChannelIfExists(originatedId);
+            }
+            await deletePendingOriginate(endpointId);
+            continue;
+          }
         } catch (error) {
           const err = error as Error & { code?: string };
           app.log.warn(
@@ -672,8 +840,22 @@ const checkPendingOriginate = async () => {
   }
 };
 
+let isCheckingPendingOriginate = false;
 // Check every 2 seconds for pending originate requests
-setInterval(checkPendingOriginate, 2000);
+setInterval(() => {
+  if (isCheckingPendingOriginate) {
+    app.log.debug("Skipping pending originate check, previous pass still running");
+    return;
+  }
+  isCheckingPendingOriginate = true;
+  checkPendingOriginate()
+    .catch((error) => {
+      app.log.error({ err: error }, "Failed to check pending originate");
+    })
+    .finally(() => {
+      isCheckingPendingOriginate = false;
+    });
+}, 2000);
 
 const protocol = httpsOptions ? "https" : "http";
 app.log.info({ protocol, port: config.appPort, hasCertificates }, "Starting server");

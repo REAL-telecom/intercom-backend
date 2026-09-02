@@ -16,8 +16,6 @@ export type CallData = {
       domain: string;
     };
   };
-  /** For ring-timeout: only hang up if still 'pending'. Set to 'accepted' when answered, 'rejected' on /calls/end, 'timeout' when we hang up by timeout. */
-  status?: "pending" | "accepted" | "rejected" | "timeout";
   /** Incoming only: bridge id for cleanup. */
   bridgeId?: string;
   /** Incoming only: display address (e.g. panel address). */
@@ -83,9 +81,25 @@ export type AriEvent = {
   [key: string]: unknown;
 };
 
-export type AriEventHandler = (event: AriEvent) => void;
+export type AriEventHandler = (event: AriEvent) => void | Promise<void>;
 
 /** ARI bridge response shape. */
 export type AriBridge = {
   id: string;
 };
+
+/** Allowed ARI hangup reasons for DELETE /channels/{channelId}?reason=. */
+export type HangupReason =
+  | "normal"
+  | "busy"
+  | "congestion"
+  | "no_answer"
+  | "timeout"
+  | "rejected"
+  | "unallocated"
+  | "normal_unspecified"
+  | "number_incomplete"
+  | "codec_mismatch"
+  | "interworking"
+  | "failure"
+  | "answered_elsewhere";

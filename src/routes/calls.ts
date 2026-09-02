@@ -5,11 +5,13 @@ import {
   setCallData,
   setEndpointSession,
   getCallData,
+  claimCallOutcome,
+  getOriginateChannelIds,
   clearActiveIncomingFromPanel,
   deletePendingOriginate,
 } from "../store/redis";
 import { createTempSipEndpoint } from "../store/postgres";
-import { hangupChannel, deleteBridge, continueInDialplan, getBridge } from "../ari/client";
+import { hangupChannel, hangupChannelIfExists, deleteBridge, continueInDialplan, getBridge } from "../ari/client";
 
 import type { CallData, CredentialsPayload } from "../types";
 
@@ -65,7 +67,8 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
       return reply.code(404).send({ error: "Call not found or already ended" });
     }
     const channelId = callData.channelId;
-    await setCallData(callId, { ...callData, status: "rejected" }, env.callTokenTtlSec);
+    const claimed = await claimCallOutcome(callId, "rejected", env.callTokenTtlSec);
+    request.log.info({ callId, claimed }, "calls/end: claimed rejected outcome");
     if (callData.endpointId) {
       try {
         await deletePendingOriginate(callData.endpointId);
@@ -84,6 +87,15 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
       await continueInDialplan(channelId, "from-domophone", "busy", 1);
     } catch (err) {
       request.log.warn({ err, channelId, callId }, "continueInDialplan failed (channel may already be down)");
+    }
+    const originateChannelIds = await getOriginateChannelIds(callId);
+    for (const originateChannelId of originateChannelIds) {
+      if (await hangupChannelIfExists(originateChannelId)) {
+        request.log.info(
+          { callId, originateChannelId },
+          "calls/end: hung up originate channel"
+        );
+      }
     }
     if (callData.bridgeId) {
       try {

@@ -19,6 +19,88 @@ export const getCallData = async <T>(callId: string) => {
   return value ? (JSON.parse(value) as T) : null;
 };
 
+/** Terminal call outcome. Absence of call_outcome:{callId} means the call is still ringing. */
+export type CallOutcome = "accepted" | "rejected" | "timeout";
+
+/**
+ * Atomically claim the call outcome (SET NX). Returns true only for the first caller.
+ * Set to 'accepted' when answered, 'rejected' on /calls/end or panel hangup while ringing, 'timeout' when we hang up by timeout.
+ */
+export const claimCallOutcome = async (
+  callId: string,
+  outcome: CallOutcome,
+  ttlSec: number
+): Promise<boolean> => {
+  const key = `call_outcome:${callId}`;
+  const result = await redisClient.set(key, outcome, "EX", ttlSec, "NX");
+  return result === "OK";
+};
+
+/**
+ * Load claimed call outcome by callId.
+ * Returns null when the call is still ringing (no outcome key).
+ */
+export const getCallOutcome = async (callId: string): Promise<CallOutcome | null> => {
+  const key = `call_outcome:${callId}`;
+  const value = await redisClient.get(key);
+  if (value === "accepted" || value === "rejected" || value === "timeout") {
+    return value;
+  }
+  return null;
+};
+
+/**
+ * Add ARI id of an originated PJSIP leg to the set with TTL.
+ * Key is originate_channels (plural) so it does not collide with the string key originate_channel.
+ */
+export const addOriginateChannelId = async (
+  callId: string,
+  channelId: string,
+  ttlSec: number
+): Promise<void> => {
+  const key = `originate_channels:${callId}`;
+  await redisClient.multi().sadd(key, channelId).expire(key, ttlSec).exec();
+};
+
+/**
+ * Load ARI ids of all originated PJSIP legs, if any.
+ */
+export const getOriginateChannelIds = async (callId: string): Promise<string[]> => {
+  const key = `originate_channels:${callId}`;
+  return redisClient.smembers(key);
+};
+
+/**
+ * Atomically claim that this contact has not been dialed yet.
+ * Prevents dialing the same contact twice on adjacent passes of the periodic task.
+ */
+export const claimContactForDial = async (
+  callId: string,
+  contact: string,
+  ttlSec: number
+): Promise<boolean> => {
+  const key = `dialed_contacts:${callId}`;
+  const replies = await redisClient.multi().sadd(key, contact).expire(key, ttlSec).exec();
+  const saddReply = replies?.[0];
+  if (!saddReply) {
+    return false;
+  }
+  const saddResult = saddReply[1];
+  return typeof saddResult === "number" && saddResult === 1;
+};
+
+/**
+ * Remove a contact from the dialed set after a failed originate.
+ * Allows the next pass to dial the contact again.
+ */
+export const releaseContactForDial = async (
+  callId: string,
+  contact: string
+): Promise<void> => {
+  const key = `dialed_contacts:${callId}`;
+  await redisClient.srem(key, contact);
+};
+
 /**
  * Derive callId by temporary endpoint id (inc_<callId> or out_<callId>).
  */

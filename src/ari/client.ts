@@ -1,7 +1,7 @@
 import WebSocket, { RawData } from "ws";
 import { env } from "../config/env";
 
-import type { AriEvent, AriEventHandler, AriBridge } from "../types";
+import type { AriEvent, AriEventHandler, AriBridge, HangupReason } from "../types";
 
 /**
  * Build ARI REST base URL (no credentials in URL).
@@ -46,12 +46,18 @@ export const connectAriEvents = (onEvent: AriEventHandler) => {
     });
 
     ws.on("message", (data: RawData) => {
+      let event: AriEvent;
       try {
-        const event = JSON.parse(data.toString()) as AriEvent;
-        onEvent(event);
+        event = JSON.parse(data.toString()) as AriEvent;
       } catch {
         console.warn("⚠️ ARI message ignored: invalid payload");
+        return;
       }
+      Promise.resolve()
+        .then(() => onEvent(event))
+        .catch((error) => {
+          console.error("❌ ARI event handler failed", error);
+        });
     });
 
     ws.on("error", (error) => {
@@ -151,9 +157,33 @@ export const holdChannel = async (channelId: string) => {
 
 /**
  * Hangup channel (terminate call).
+ * Optional reason is sent as a query parameter (e.g. answered_elsewhere).
  */
-export const hangupChannel = async (channelId: string) => {
+export const hangupChannel = async (channelId: string, reason?: HangupReason) => {
+  if (reason) {
+    const params = new URLSearchParams({ reason });
+    return request(`/channels/${channelId}?${params.toString()}`, "DELETE");
+  }
   return request(`/channels/${channelId}`, "DELETE");
+};
+
+/**
+ * Hangup if the channel still exists. Returns false when id is missing or ARI already tore it down.
+ * Optional reason is forwarded to hangupChannel.
+ */
+export const hangupChannelIfExists = async (
+  channelId: string | null | undefined,
+  reason?: HangupReason
+) => {
+  if (!channelId) {
+    return false;
+  }
+  try {
+    await hangupChannel(channelId, reason);
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 /**
@@ -179,11 +209,15 @@ export const continueInDialplan = async (
  * appArgs may include metadata (e.g. bridge id).
  */
 export const originateCall = async (endpoint: string, appArgs: string) => {
-  return request("/channels", "POST", {
+  const channel = await request<{ id?: string }>("/channels", "POST", {
     endpoint,
     app: env.ariAppName,
     appArgs,
   });
+  if (!channel?.id) {
+    throw new Error("ARI originate returned no channel id");
+  }
+  return { id: channel.id };
 };
 
 /**
@@ -219,6 +253,19 @@ export const getChannel = async (channelId: string) => {
   return request<{ id: string; state: string; name: string; caller: { number: string }; connected: { number: string } }>(
     `/channels/${channelId}`
   );
+};
+
+/**
+ * Get the value of a channel variable or function.
+ * Unlike GET /asterisk/variable, this endpoint evaluates dialplan functions.
+ * 404 means the channel or variable was not found — callers must handle that.
+ */
+export const getChannelVariable = async (channelId: string, variable: string): Promise<string> => {
+  const params = new URLSearchParams({ variable });
+  const result = await request<{ value?: string }>(
+    `/channels/${channelId}/variable?${params.toString()}`
+  );
+  return result?.value ?? "";
 };
 
 /**
