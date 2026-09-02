@@ -54,7 +54,7 @@ import {
   setActiveIncomingFromPanel,
   clearActiveIncomingFromPanel,
 } from "./store/redis";
-import { sendFcmPush } from "./push/fcm";
+import { sendFcmCallEnded, sendFcmPush } from "./push/fcm";
 import { sendApnsVoipPush } from "./push/apns";
 import crypto from "crypto";
 
@@ -141,6 +141,64 @@ const removeTemporarySipEndpoint = async (
   }
   if (deleted) {
     app.log.debug({ endpointId, ...logCtx }, "Temporary SIP endpoint removed");
+  }
+};
+
+/**
+ * Notify Android devices that the call ended without user action (timeout or canceled).
+ * Android-only: iOS needs a regular (non-VoIP) APNs address that is not in the project yet;
+ * filtering "everything except ios_voip" would send those addresses to FCM once they appear.
+ */
+const sendCallEndedPush = async (
+  callId: string,
+  callData: CallData,
+  reason: "timeout" | "caller_hung_up"
+) => {
+  try {
+    const userId = callData.userId ?? null;
+    if (userId === null) {
+      app.log.warn(
+        {
+          callId,
+          reason,
+          domophoneEndpointId: callData.domophoneEndpointId,
+          apartment: callData.apartment,
+        },
+        "No user mapping for call-ended push, skipping push"
+      );
+      return;
+    }
+
+    const records = await getPushTokenRecords(userId);
+    const androidTokens = records.filter((r) => r.platform === "android").map((r) => r.pushToken);
+    if (androidTokens.length === 0) {
+      app.log.warn(
+        { callId, reason, userId },
+        "No Android push tokens for call-ended push, skipping push"
+      );
+      return;
+    }
+
+    app.log.info(
+      { callId, reason, tokensCount: androidTokens.length },
+      "Sending FCM call-ended push"
+    );
+    const { invalidTokens } = await sendFcmCallEnded(androidTokens, {
+      type: "SIP_CALL_ENDED",
+      callId,
+      address: callData.address ?? "",
+      reason,
+    });
+    app.log.info({ callId }, "FCM call-ended push sent");
+    if (invalidTokens.length > 0) {
+      await deletePushTokens(userId, invalidTokens);
+      app.log.info(
+        { callId, userId, removedCount: invalidTokens.length },
+        "Removed invalid FCM tokens from DB (call-ended)"
+      );
+    }
+  } catch (error) {
+    app.log.warn({ err: error, callId, reason }, "Failed to send FCM call-ended push");
   }
 };
 
@@ -540,6 +598,11 @@ connectAriEvents(async (event) => {
                 app.log.info({ callId, originateChannelId }, "Timed out: hung up originate channel");
               }
             }
+            if (callData) {
+              await sendCallEndedPush(callId, callData, "timeout");
+            } else {
+              app.log.warn({ callId }, "No call data for call-ended push, skipping push");
+            }
             try {
               const bridgeInfo = await getBridge(capturedBridgeId);
               if (bridgeInfo?.channels?.length) {
@@ -609,7 +672,7 @@ connectAriEvents(async (event) => {
 
     const callId = channelSession?.callId;
     if (callId && callData) {
-      const claimed = await claimCallOutcome(callId, "rejected", env.callTokenTtlSec);
+      const claimed = await claimCallOutcome(callId, "canceled", env.callTokenTtlSec);
       if (claimed) {
         if (callData.endpointId) {
           try {
@@ -632,6 +695,10 @@ connectAriEvents(async (event) => {
         if (await hangupChannelIfExists(originateChannelId)) {
           app.log.info({ originateChannelId, channelId, callId }, "StasisEnd: hung up originate channel");
         }
+      }
+
+      if (claimed) {
+        await sendCallEndedPush(callId, callData, "caller_hung_up");
       }
 
       if (callData.domophoneEndpointId) {
@@ -702,7 +769,7 @@ const parseDialContacts = (dialString: string): string[] => {
  * at runtime do not update ARI device state.
  * Each pass originates a separate INVITE per PJSIP contact; pending is kept
  * while the call is still ringing so devices that register later are dialed.
- * Pending is deleted once the call is answered, rejected, timed out, or the panel channel is gone.
+ * Pending is deleted once the call is answered, rejected, canceled, timed out, or the panel channel is gone.
  */
 const checkPendingOriginate = async () => {
   try {

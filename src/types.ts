@@ -61,6 +61,14 @@ export type FcmCallPayload = {
   address?: string;
 };
 
+/** FCM data message payload for "call ended" push. */
+export type FcmCallEndedPayload = {
+  type: "SIP_CALL_ENDED";
+  callId: string;
+  address: string;
+  reason: "timeout" | "caller_hung_up";
+};
+
 /** APNs VoIP payload for incoming call push (flat string values, same keys as FCM data). */
 export type ApnsVoipCallPayload = {
   type: "SIP_CALL";

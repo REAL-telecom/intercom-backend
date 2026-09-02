@@ -20,11 +20,11 @@ export const getCallData = async <T>(callId: string) => {
 };
 
 /** Terminal call outcome. Absence of call_outcome:{callId} means the call is still ringing. */
-export type CallOutcome = "accepted" | "rejected" | "timeout";
+export type CallOutcome = "accepted" | "rejected" | "timeout" | "canceled";
 
 /**
  * Atomically claim the call outcome (SET NX). Returns true only for the first caller.
- * Set to 'accepted' when answered, 'rejected' on /calls/end or panel hangup while ringing, 'timeout' when we hang up by timeout.
+ * Set to 'accepted' when answered, 'rejected' on /calls/end (user decline), 'canceled' when the caller hangs up while ringing, 'timeout' when we hang up by timeout.
  */
 export const claimCallOutcome = async (
   callId: string,
@@ -43,7 +43,7 @@ export const claimCallOutcome = async (
 export const getCallOutcome = async (callId: string): Promise<CallOutcome | null> => {
   const key = `call_outcome:${callId}`;
   const value = await redisClient.get(key);
-  if (value === "accepted" || value === "rejected" || value === "timeout") {
+  if (value === "accepted" || value === "rejected" || value === "timeout" || value === "canceled") {
     return value;
   }
   return null;

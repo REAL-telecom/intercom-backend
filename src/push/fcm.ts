@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as admin from "firebase-admin";
 import { env } from "../config/env";
 
-import type { FcmCallPayload } from "../types";
+import type { FcmCallEndedPayload, FcmCallPayload } from "../types";
 
 let initialized = false;
 
@@ -72,5 +72,22 @@ export const sendFcmPush = async (
   if (payload.address != null && payload.address !== "") {
     data.address = payload.address;
   }
+  return sendFcm(tokens, data);
+};
+
+/**
+ * Send data-only FCM "call ended". Returns invalid tokens to remove from DB.
+ * reason lets the app distinguish a missed call (timeout) from dismissing the incoming screen (caller hung up). Sent only for timeout and canceled outcomes.
+ */
+export const sendFcmCallEnded = async (
+  tokens: string[],
+  payload: FcmCallEndedPayload
+): Promise<{ invalidTokens: string[] }> => {
+  const data: Record<string, string> = {
+    type: payload.type,
+    callId: payload.callId,
+    address: payload.address,
+    reason: payload.reason,
+  };
   return sendFcm(tokens, data);
 };
