@@ -30,7 +30,7 @@ export const registerPushRoutes = async (app: FastifyInstance) => {
   app.post<{ Body: RegisterBody }>("/push/register", async (request) => {
     const { userId: rawUserId, pushToken, platform } = request.body;
     const userId = parseRegisterUserId(rawUserId);
-    if (userId === null || !pushToken || !platform) {
+    if (userId === null || !pushToken || (platform !== "android" && platform !== "ios_voip" && platform !== "ios_apns")) {
       return app.httpErrors.badRequest("Missing required fields");
     }
 

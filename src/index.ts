@@ -16,11 +16,13 @@ import {
   hangupChannelIfExists,
   originateCall,
   getChannel,
+  listChannels,
   getChannelVariable,
   getBridge,
   deleteBridge,
   deleteEndpoint,
   continueInDialplan,
+  isAriNotFound,
 } from "./ari/client";
 import {
   getPushTokenRecords,
@@ -55,7 +57,7 @@ import {
   clearActiveIncomingFromPanel,
 } from "./store/redis";
 import { sendFcmCallEnded, sendFcmPush } from "./push/fcm";
-import { sendApnsVoipPush } from "./push/apns";
+import { sendApnsCallEndedPush, sendApnsVoipPush } from "./push/apns";
 import crypto from "crypto";
 
 import type { ChannelSession, CallData } from "./types";
@@ -144,10 +146,12 @@ const removeTemporarySipEndpoint = async (
   }
 };
 
+const CALL_ENDED_PUSH_TITLE = "Пропущенный вызов";
+const CALL_ENDED_PUSH_BODY_DEFAULT = "Домофон";
+
 /**
- * Notify Android devices that the call ended without user action (timeout or canceled).
- * Android-only: iOS needs a regular (non-VoIP) APNs address that is not in the project yet;
- * filtering "everything except ios_voip" would send those addresses to FCM once they appear.
+ * Notify devices that the call ended without user action (timeout or canceled).
+ * Android gets FCM; iPhone gets a regular (non-VoIP) APNs alert.
  */
 const sendCallEndedPush = async (
   callId: string,
@@ -171,34 +175,85 @@ const sendCallEndedPush = async (
 
     const records = await getPushTokenRecords(userId);
     const androidTokens = records.filter((r) => r.platform === "android").map((r) => r.pushToken);
-    if (androidTokens.length === 0) {
+    const iosApnsTokens = records.filter((r) => r.platform === "ios_apns").map((r) => r.pushToken);
+    if (androidTokens.length === 0 && iosApnsTokens.length === 0) {
       app.log.warn(
         { callId, reason, userId },
-        "No Android push tokens for call-ended push, skipping push"
+        "No push tokens for call-ended push, skipping push"
       );
       return;
     }
 
-    app.log.info(
-      { callId, reason, tokensCount: androidTokens.length },
-      "Sending FCM call-ended push"
-    );
-    const { invalidTokens } = await sendFcmCallEnded(androidTokens, {
-      type: "SIP_CALL_ENDED",
-      callId,
-      address: callData.address ?? "",
-      reason,
-    });
-    app.log.info({ callId }, "FCM call-ended push sent");
+    const address = callData.address ?? "";
+    const body =
+      callData.address != null && callData.address !== ""
+        ? callData.address
+        : CALL_ENDED_PUSH_BODY_DEFAULT;
+    const title = CALL_ENDED_PUSH_TITLE;
+    const invalidTokens: string[] = [];
+    let fcmInvalidCount = 0;
+    let apnsInvalidCount = 0;
+
+    if (androidTokens.length > 0) {
+      app.log.info(
+        { callId, reason, tokensCount: androidTokens.length },
+        "Sending FCM call-ended push"
+      );
+      try {
+        const { invalidTokens: fcmInvalid } = await sendFcmCallEnded(androidTokens, {
+          type: "SIP_CALL_ENDED",
+          callId,
+          address,
+          reason,
+          title,
+          body,
+        });
+        fcmInvalidCount = fcmInvalid.length;
+        invalidTokens.push(...fcmInvalid);
+        app.log.info({ callId }, "FCM call-ended push sent");
+      } catch (error) {
+        app.log.warn({ err: error, callId, reason }, "Failed to send FCM call-ended push");
+      }
+    }
+
+    if (iosApnsTokens.length > 0) {
+      app.log.info(
+        { callId, reason, tokensCount: iosApnsTokens.length },
+        "Sending APNs call-ended push"
+      );
+      try {
+        const { invalidTokens: apnsInvalid } = await sendApnsCallEndedPush(iosApnsTokens, {
+          type: "SIP_CALL_ENDED",
+          callId,
+          reason,
+          title,
+          body,
+        });
+        apnsInvalidCount = apnsInvalid.length;
+        invalidTokens.push(...apnsInvalid);
+        app.log.info({ callId }, "APNs call-ended push sent");
+      } catch (error) {
+        app.log.warn({ err: error, callId, reason }, "Failed to send APNs call-ended push");
+      }
+    }
+
     if (invalidTokens.length > 0) {
       await deletePushTokens(userId, invalidTokens);
-      app.log.info(
-        { callId, userId, removedCount: invalidTokens.length },
-        "Removed invalid FCM tokens from DB (call-ended)"
-      );
+      if (fcmInvalidCount > 0) {
+        app.log.info(
+          { callId, userId, removedCount: fcmInvalidCount },
+          "Removed invalid FCM tokens from DB (call-ended)"
+        );
+      }
+      if (apnsInvalidCount > 0) {
+        app.log.info(
+          { callId, userId, removedCount: apnsInvalidCount },
+          "Removed invalid APNs tokens from DB (call-ended)"
+        );
+      }
     }
   } catch (error) {
-    app.log.warn({ err: error, callId, reason }, "Failed to send FCM call-ended push");
+    app.log.warn({ err: error, callId, reason }, "Failed to send call-ended push");
   }
 };
 
@@ -505,7 +560,7 @@ connectAriEvents(async (event) => {
         if (records.length === 0) {
           app.log.warn({ userId }, "No push tokens for user");
         } else {
-        const androidTokens = records.filter((r) => r.platform !== "ios_voip").map((r) => r.pushToken);
+        const androidTokens = records.filter((r) => r.platform === "android").map((r) => r.pushToken);
         const iosVoipTokens = records.filter((r) => r.platform === "ios_voip").map((r) => r.pushToken);
         const sipCredentials = { username: sipUsername, password: sipPassword, domain: env.serverDomain };
         const callPayload = {
@@ -594,7 +649,7 @@ connectAriEvents(async (event) => {
             }
             const originateChannelIds = await getOriginateChannelIds(callId);
             for (const originateChannelId of originateChannelIds) {
-              if (await hangupChannelIfExists(originateChannelId)) {
+              if ((await hangupChannelIfExists(originateChannelId)) === "hung_up") {
                 app.log.info({ callId, originateChannelId }, "Timed out: hung up originate channel");
               }
             }
@@ -605,20 +660,30 @@ connectAriEvents(async (event) => {
             }
             try {
               const bridgeInfo = await getBridge(capturedBridgeId);
+              let hangupFailed = false;
               if (bridgeInfo?.channels?.length) {
                 for (const chId of bridgeInfo.channels) {
                   if (chId === channelId) continue;
-                  try {
-                    await hangupChannel(chId);
-                  } catch (err) {
-                    app.log.debug({ err, chId }, "Timed out: hangupChannel failed (channel may already be down)");
+                  if ((await hangupChannelIfExists(chId)) === "failed") {
+                    hangupFailed = true;
                   }
                 }
               }
-              await deleteBridge(capturedBridgeId);
-              app.log.info({ bridgeId: capturedBridgeId }, "Timed out: bridge deleted");
+              if (hangupFailed) {
+                app.log.warn(
+                  { bridgeId: capturedBridgeId },
+                  "Timed out: skipping bridge delete, channel hangup failed"
+                );
+              } else {
+                await deleteBridge(capturedBridgeId);
+                app.log.info({ bridgeId: capturedBridgeId }, "Timed out: bridge deleted");
+              }
             } catch (error) {
-              app.log.debug({ err: error, bridgeId: capturedBridgeId }, "Bridge already deleted or delete failed");
+              if (isAriNotFound(error)) {
+                app.log.debug({ err: error, bridgeId: capturedBridgeId }, "Bridge already deleted or delete failed");
+              } else {
+                app.log.warn({ err: error, bridgeId: capturedBridgeId }, "Bridge already deleted or delete failed");
+              }
             }
             if (callData?.domophoneEndpointId) {
               await clearActiveIncomingFromPanel(callData.domophoneEndpointId);
@@ -651,20 +716,29 @@ connectAriEvents(async (event) => {
     if (bridgeId) {
       try {
         const bridgeInfo = await getBridge(bridgeId);
+        let hangupFailed = false;
         if (bridgeInfo?.channels?.length) {
           for (const chId of bridgeInfo.channels) {
-            try {
-              await hangupChannel(chId);
+            const hangupResult = await hangupChannelIfExists(chId);
+            if (hangupResult === "hung_up") {
               app.log.info({ channelId: chId, bridgeId }, "StasisEnd: hung up channel in bridge");
-            } catch (err) {
-              app.log.debug({ err, channelId: chId }, "StasisEnd: channel already gone");
+            } else if (hangupResult === "failed") {
+              hangupFailed = true;
             }
           }
         }
-        await deleteBridge(bridgeId);
-        app.log.info({ bridgeId, channelId }, "StasisEnd: bridge deleted");
+        if (hangupFailed) {
+          app.log.warn({ bridgeId, channelId }, "StasisEnd: skipping bridge delete, channel hangup failed");
+        } else {
+          await deleteBridge(bridgeId);
+          app.log.info({ bridgeId, channelId }, "StasisEnd: bridge deleted");
+        }
       } catch (error) {
-        app.log.debug({ err: error, bridgeId, channelId }, "StasisEnd: bridge already deleted or cleanup failed");
+        if (isAriNotFound(error)) {
+          app.log.debug({ err: error, bridgeId, channelId }, "StasisEnd: bridge already deleted or cleanup failed");
+        } else {
+          app.log.warn({ err: error, bridgeId, channelId }, "StasisEnd: bridge already deleted or cleanup failed");
+        }
       }
     } else {
       app.log.debug({ channelId }, "No bridgeId in channel session or call data, skipping bridge cleanup");
@@ -692,7 +766,7 @@ connectAriEvents(async (event) => {
 
       const originateChannelIds = await getOriginateChannelIds(callId);
       for (const originateChannelId of originateChannelIds) {
-        if (await hangupChannelIfExists(originateChannelId)) {
+        if ((await hangupChannelIfExists(originateChannelId)) === "hung_up") {
           app.log.info({ originateChannelId, channelId, callId }, "StasisEnd: hung up originate channel");
         }
       }
@@ -707,6 +781,40 @@ connectAriEvents(async (event) => {
     }
 
     // Redis will cleanup session data automatically by TTL
+  }
+
+  if (event.type === "ChannelLeftBridge" && typeof event.bridge === "object" && event.bridge) {
+    const bridge = event.bridge as { id?: string; channels?: string[] };
+    const bridgeId = bridge.id;
+    if (!bridgeId) {
+      return;
+    }
+    const remaining = Array.isArray(bridge.channels) ? bridge.channels : [];
+    if (remaining.length > 1) {
+      return;
+    }
+    if (remaining.length === 1) {
+      const leftoverChannelId = remaining[0];
+      if (leftoverChannelId) {
+        app.log.info({ bridgeId, leftoverChannelId }, "ChannelLeftBridge: hanging up leftover channel");
+        if ((await hangupChannelIfExists(leftoverChannelId)) === "failed") {
+          app.log.warn(
+            { bridgeId, leftoverChannelId },
+            "ChannelLeftBridge: skipping bridge delete, leftover hangup failed"
+          );
+          return;
+        }
+      }
+    }
+    try {
+      await deleteBridge(bridgeId);
+    } catch (error) {
+      if (isAriNotFound(error)) {
+        app.log.debug({ err: error, bridgeId }, "ChannelLeftBridge: bridge already deleted");
+      } else {
+        app.log.warn({ err: error, bridgeId }, "ChannelLeftBridge: failed to delete bridge");
+      }
+    }
   }
 });
 
@@ -750,6 +858,73 @@ setInterval(() => {
     })
     .finally(() => {
       isCleaningStaleEndpoints = false;
+    });
+}, 60000);
+
+const parseAriTimestamp = (value: string | undefined): number | null => {
+  if (typeof value !== "string" || value.length === 0) {
+    return null;
+  }
+  // Asterisk Date strings use +0000 / -0600; Date.parse needs a colon in the offset.
+  const normalized = value.replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
+  const ms = Date.parse(normalized);
+  return Number.isNaN(ms) ? null : ms;
+};
+
+const isTemporaryEndpointChannel = (name: string | undefined): boolean => {
+  const namePart = name?.split("/")[1];
+  return Boolean(namePart && (namePart.startsWith("inc_") || namePart.startsWith("out_")));
+};
+
+/**
+ * Hang up leftover temp-endpoint channels older than maxCallDurationSec.
+ * Age-only: a live bridged talk past the limit is hung up too.
+ */
+const hangupOverdueChannels = async () => {
+  try {
+    const channels = await listChannels();
+    const maxAgeMs = env.maxCallDurationSec * 1000;
+    const now = Date.now();
+    for (const channel of channels) {
+      if (!isTemporaryEndpointChannel(channel.name)) {
+        continue;
+      }
+      const createdAtMs = parseAriTimestamp(channel.creationtime);
+      if (createdAtMs === null) {
+        app.log.warn(
+          { channelId: channel.id, name: channel.name, creationtime: channel.creationtime },
+          "Cleanup: skipped overdue hangup, could not parse channel creationtime"
+        );
+        continue;
+      }
+      const ageMs = now - createdAtMs;
+      if (ageMs <= maxAgeMs) {
+        continue;
+      }
+      app.log.warn(
+        { channelId: channel.id, name: channel.name, ageSec: Math.floor(ageMs / 1000) },
+        "Cleanup: hanging up overdue channel"
+      );
+      await hangupChannelIfExists(channel.id);
+    }
+  } catch (error) {
+    app.log.warn({ err: error }, "Cleanup: failed to hang up overdue channels");
+  }
+};
+
+let isHangingUpOverdueChannels = false;
+setInterval(() => {
+  if (isHangingUpOverdueChannels) {
+    app.log.debug("Cleanup: skipping overdue channels, previous pass still running");
+    return;
+  }
+  isHangingUpOverdueChannels = true;
+  hangupOverdueChannels()
+    .catch((error) => {
+      app.log.error({ err: error }, "Cleanup: failed to hang up overdue channels");
+    })
+    .finally(() => {
+      isHangingUpOverdueChannels = false;
     });
 }, 60000);
 

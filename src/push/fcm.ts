@@ -88,6 +88,8 @@ export const sendFcmCallEnded = async (
     callId: payload.callId,
     address: payload.address,
     reason: payload.reason,
+    title: payload.title,
+    body: payload.body,
   };
   return sendFcm(tokens, data);
 };

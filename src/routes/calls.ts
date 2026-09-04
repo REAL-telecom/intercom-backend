@@ -11,7 +11,7 @@ import {
   deletePendingOriginate,
 } from "../store/redis";
 import { createTempSipEndpoint } from "../store/postgres";
-import { hangupChannel, hangupChannelIfExists, deleteBridge, continueInDialplan, getBridge } from "../ari/client";
+import { hangupChannelIfExists, deleteBridge, continueInDialplan, getBridge } from "../ari/client";
 
 import type { CallData, CredentialsPayload } from "../types";
 
@@ -90,7 +90,7 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
     }
     const originateChannelIds = await getOriginateChannelIds(callId);
     for (const originateChannelId of originateChannelIds) {
-      if (await hangupChannelIfExists(originateChannelId)) {
+      if ((await hangupChannelIfExists(originateChannelId)) === "hung_up") {
         request.log.info(
           { callId, originateChannelId },
           "calls/end: hung up originate channel"
@@ -100,17 +100,23 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
     if (callData.bridgeId) {
       try {
         const bridgeInfo = await getBridge(callData.bridgeId);
+        let hangupFailed = false;
         if (bridgeInfo?.channels?.length) {
           for (const chId of bridgeInfo.channels) {
             if (chId === channelId) continue;
-            try {
-              await hangupChannel(chId);
-            } catch (err) {
-              request.log.debug({ err, chId }, "hangupChannel failed (channel may already be down)");
+            if ((await hangupChannelIfExists(chId)) === "failed") {
+              hangupFailed = true;
             }
           }
         }
-        await deleteBridge(callData.bridgeId);
+        if (hangupFailed) {
+          request.log.warn(
+            { bridgeId: callData.bridgeId },
+            "calls/end: skipping bridge delete, channel hangup failed"
+          );
+        } else {
+          await deleteBridge(callData.bridgeId);
+        }
       } catch (err) {
         request.log.debug({ err, bridgeId: callData.bridgeId }, "deleteBridge failed (bridge may already be gone)");
       }

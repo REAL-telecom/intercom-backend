@@ -25,8 +25,11 @@ export const env = {
   ariUser: requireEnv("ARI_USER"),
   ariPassword: requireEnv("ARI_PASSWORD"),
   ariAppName: "intercom",
-  callTokenTtlSec: 300,
+  // Outcome keys must outlive the call: if they expire first, panel hangup is treated as cancel and devices get a false missed-call push.
+  // Overdue hangup lands up to one cleanup period late, so the margin covers maxCallDurationSec plus that period.
+  callTokenTtlSec: 420,
   ringTimeoutSec: 15,
+  maxCallDurationSec: 300,
   redisHost: process.env.REDIS_HOST ?? "127.0.0.1",
   redisPort: parsePort(process.env.REDIS_PORT ?? "6379", 6379),
   redisPassword: requireEnv("REDIS_PASSWORD"),

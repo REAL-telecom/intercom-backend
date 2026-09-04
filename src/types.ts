@@ -46,11 +46,13 @@ export type CredentialsPayload = {
   };
 };
 
+export type PushPlatform = "android" | "ios_voip" | "ios_apns";
+
 /** Body for POST /push/register. */
 export type RegisterBody = {
   userId: number | string;
   pushToken: string;
-  platform: string;
+  platform: PushPlatform;
 };
 
 /** FCM data message payload for incoming call push. */
@@ -67,6 +69,8 @@ export type FcmCallEndedPayload = {
   callId: string;
   address: string;
   reason: "timeout" | "caller_hung_up";
+  title: string;
+  body: string;
 };
 
 /** APNs VoIP payload for incoming call push (flat string values, same keys as FCM data). */
@@ -77,10 +81,19 @@ export type ApnsVoipCallPayload = {
   address?: string;
 };
 
-/** Stored push token with platform (android FCM vs ios_voip). */
+/** APNs alert payload for "call ended" push (regular APNs, not PushKit). */
+export type ApnsCallEndedPayload = {
+  type: "SIP_CALL_ENDED";
+  callId: string;
+  reason: "timeout" | "caller_hung_up";
+  title: string;
+  body: string;
+};
+
+/** Stored push token with platform (android FCM, ios_voip, or ios_apns). */
 export type PushTokenRecord = {
   pushToken: string;
-  platform: string;
+  platform: PushPlatform;
 };
 
 /** ARI WebSocket event shape. */

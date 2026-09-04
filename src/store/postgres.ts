@@ -1,7 +1,7 @@
 import { Pool } from "pg";
 import { env } from "../config/env";
 
-import type { PushTokenRecord } from "../types";
+import type { PushPlatform, PushTokenRecord } from "../types";
 
 const pool = new Pool({
   host: env.postgres.host,
@@ -134,12 +134,12 @@ export const createDatabaseSchema = async () => {
 };
 
 /**
- * Save (or update) push token (FCM) for a user.
+ * Save (or update) push token (android FCM, ios_voip, or ios_apns) for a user.
  */
 export const savePushToken = async (params: {
   userId: number;
   pushToken: string;
-  platform: string;
+  platform: PushPlatform;
 }) => {
   const { userId, pushToken, platform } = params;
   await pool.query(
@@ -297,7 +297,7 @@ export const getUser = async (
 export const getPushTokenRecords = async (
   userId: number | string
 ): Promise<PushTokenRecord[]> => {
-  const result = await pool.query<{ push_token: string; platform: string }>(
+  const result = await pool.query<{ push_token: string; platform: PushPlatform }>(
     `SELECT push_token, platform FROM push_tokens WHERE user_id = $1`,
     [userId]
   );

@@ -80,6 +80,68 @@ export const connectAriEvents = (onEvent: AriEventHandler) => {
   return connect() ?? current!;
 };
 
+const ARI_IDEMPOTENT_RETRY_COUNT = 2;
+const ARI_IDEMPOTENT_RETRY_DELAY_MS = 200;
+const ARI_REQUEST_TIMEOUT_MS = 10_000;
+
+export class AriRequestError extends Error {
+  readonly body: string;
+  readonly status: number;
+
+  constructor(status: number, body: string) {
+    super(`ARI request failed: ${status} ${body}`);
+    this.name = "AriRequestError";
+    this.body = body;
+    this.status = status;
+  }
+}
+
+export class AriTransportError extends Error {
+  readonly cause: unknown;
+  readonly isTimeout: boolean;
+
+  constructor(message: string, options: { cause: unknown; isTimeout: boolean }) {
+    super(message);
+    this.name = "AriTransportError";
+    this.cause = options.cause;
+    this.isTimeout = options.isTimeout;
+  }
+}
+
+export type HangupIfExistsResult = "hung_up" | "already_gone" | "failed";
+
+export const isAriNotFound = (error: unknown): boolean =>
+  error instanceof AriRequestError && error.status === 404;
+
+const isAriTimeoutCause = (error: unknown): boolean => {
+  let current: unknown = error;
+  // Node fetch wraps AbortSignal.timeout in TypeError.cause.
+  for (let depth = 0; depth < 5 && current && typeof current === "object"; depth++) {
+    if ("name" in current && (current.name === "TimeoutError" || current.name === "AbortError")) {
+      return true;
+    }
+    if (!("cause" in current)) {
+      break;
+    }
+    current = current.cause;
+  }
+  return false;
+};
+
+const toAriTransportError = (error: unknown): AriTransportError => {
+  const isTimeout = isAriTimeoutCause(error);
+  const detail = error instanceof Error ? error.message : "ARI request transport failed";
+  return new AriTransportError(isTimeout ? `ARI request timed out: ${detail}` : `ARI request failed: ${detail}`, {
+    cause: error,
+    isTimeout,
+  });
+};
+
+const delay = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
 /**
  * Perform ARI REST request.
  */
@@ -90,33 +152,60 @@ const request = async <T = unknown>(path: string, method = "GET", body?: unknown
       "Content-Type": "application/json",
       Authorization: buildAuthHeader(),
     },
+    signal: AbortSignal.timeout(ARI_REQUEST_TIMEOUT_MS),
   };
   if (body !== undefined) {
     init.body = JSON.stringify(body);
   }
-  const res = await fetch(`${buildBaseUrl()}${path}`, init);
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`ARI request failed: ${res.status} ${text}`);
-  }
-
-  // Many ARI endpoints (e.g. /channels/{id}/hold) return 204 No Content.
-  if (res.status === 204) {
-    return undefined as T;
-  }
-
-  // Some successful ARI responses may have an empty body.
-  const text = await res.text();
-  if (!text) {
-    return undefined as T;
-  }
-
-  // Prefer JSON parsing when possible, but don't assume every successful response has JSON.
   try {
-    return JSON.parse(text) as T;
-  } catch {
-    return text as unknown as T;
+    const res = await fetch(`${buildBaseUrl()}${path}`, init);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new AriRequestError(res.status, text);
+    }
+
+    // Many ARI endpoints (e.g. /channels/{id}/hold) return 204 No Content.
+    if (res.status === 204) {
+      return undefined as T;
+    }
+
+    // Some successful ARI responses may have an empty body.
+    const text = await res.text();
+    if (!text) {
+      return undefined as T;
+    }
+
+    // Prefer JSON parsing when possible, but don't assume every successful response has JSON.
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      return text as unknown as T;
+    }
+  } catch (error) {
+    if (error instanceof AriRequestError) {
+      throw error;
+    }
+    throw toAriTransportError(error);
   }
+};
+
+const isAriRetryable = (error: unknown): boolean =>
+  error instanceof AriTransportError || (error instanceof AriRequestError && error.status >= 500);
+
+const requestIdempotent = async <T = unknown>(path: string, method = "GET", body?: unknown): Promise<T> => {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= ARI_IDEMPOTENT_RETRY_COUNT; attempt++) {
+    try {
+      return await request<T>(path, method, body);
+    } catch (error) {
+      lastError = error;
+      if (!isAriRetryable(error) || attempt === ARI_IDEMPOTENT_RETRY_COUNT) {
+        throw error;
+      }
+      await delay(ARI_IDEMPOTENT_RETRY_DELAY_MS);
+    }
+  }
+  throw lastError;
 };
 
 /**
@@ -162,27 +251,36 @@ export const holdChannel = async (channelId: string) => {
 export const hangupChannel = async (channelId: string, reason?: HangupReason) => {
   if (reason) {
     const params = new URLSearchParams({ reason });
-    return request(`/channels/${channelId}?${params.toString()}`, "DELETE");
+    return requestIdempotent(`/channels/${channelId}?${params.toString()}`, "DELETE");
   }
-  return request(`/channels/${channelId}`, "DELETE");
+  return requestIdempotent(`/channels/${channelId}`, "DELETE");
 };
 
 /**
- * Hangup if the channel still exists. Returns false when id is missing or ARI already tore it down.
+ * Hangup if the channel still exists.
+ * Returns "hung_up", "already_gone" when id is missing or ARI already tore it down, or "failed".
  * Optional reason is forwarded to hangupChannel.
  */
 export const hangupChannelIfExists = async (
   channelId: string | null | undefined,
   reason?: HangupReason
-) => {
+): Promise<HangupIfExistsResult> => {
   if (!channelId) {
-    return false;
+    return "already_gone";
   }
   try {
     await hangupChannel(channelId, reason);
-    return true;
-  } catch {
-    return false;
+    return "hung_up";
+  } catch (error) {
+    if (isAriNotFound(error)) {
+      return "already_gone";
+    }
+    const status = error instanceof AriRequestError ? error.status : undefined;
+    console.warn(
+      `⚠️ ARI hangup failed: channel=${channelId}${status !== undefined ? ` status=${status}` : ""}`,
+      error
+    );
+    return "failed";
   }
 };
 
@@ -243,7 +341,7 @@ export const originateToDialplan = async (params: {
  * Delete bridge when call ends.
  */
 export const deleteBridge = async (bridgeId: string) => {
-  return request(`/bridges/${bridgeId}`, "DELETE");
+  return requestIdempotent(`/bridges/${bridgeId}`, "DELETE");
 };
 
 /**
@@ -253,6 +351,14 @@ export const getChannel = async (channelId: string) => {
   return request<{ id: string; state: string; name: string; caller: { number: string }; connected: { number: string } }>(
     `/channels/${channelId}`
   );
+};
+
+/**
+ * List all active channels.
+ */
+export const listChannels = async () => {
+  const channels = await request<{ id: string; name: string; creationtime: string }[]>("/channels");
+  return Array.isArray(channels) ? channels : [];
 };
 
 /**
@@ -284,16 +390,19 @@ export const deleteEndpoint = async (endpointId: string) => {
   const objectTypes = ["endpoint", "auth", "aor"] as const;
   for (const objectType of objectTypes) {
     const path = `/asterisk/config/dynamic/res_pjsip/${objectType}/${encodeURIComponent(endpointId)}`;
-    const res = await fetch(`${buildBaseUrl()}${path}`, {
-      method: "DELETE",
-      headers: {
-        Authorization: buildAuthHeader(),
-      },
-    });
-    if (res.ok || res.status === 404) {
-      continue;
+    try {
+      await requestIdempotent(path, "DELETE");
+    } catch (error) {
+      if (isAriNotFound(error)) {
+        continue;
+      }
+      const detail =
+        error instanceof AriRequestError
+          ? `${error.status} ${error.body}`
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      throw new Error(`ARI delete ${objectType} ${endpointId} failed: ${detail}`);
     }
-    const text = await res.text();
-    throw new Error(`ARI delete ${objectType} ${endpointId} failed: ${res.status} ${text}`);
   }
 };

@@ -3,7 +3,26 @@ import * as http2 from "http2";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env";
 
-import type { ApnsVoipCallPayload } from "../types";
+import type { ApnsCallEndedPayload, ApnsVoipCallPayload } from "../types";
+
+type ApnsJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | ApnsJsonValue[]
+  | ApnsJsonObject;
+
+type ApnsJsonObject = {
+  [key: string]: ApnsJsonValue;
+};
+
+type ApnsSendOptions = {
+  topic: string;
+  pushType: string;
+  priority: string;
+  expiration?: string;
+};
 
 const JWT_MAX_AGE_MS = 55 * 60 * 1000;
 const JWT_MIN_REISSUE_MS = 20 * 60 * 1000;
@@ -127,25 +146,29 @@ function waitForSessionConnect(
 }
 
 /**
- * POST a VoIP payload to one device token. Caller interprets status.
+ * POST a payload to one device token. Caller interprets status.
  */
 function sendApnsRequest(
   token: string,
-  body: Record<string, string>
+  body: ApnsJsonObject,
+  options: ApnsSendOptions
 ): Promise<{ status: number; data: string }> {
   return new Promise((resolve, reject) => {
     void getApnsSession()
       .then((session) => {
-        const req = session.request({
+        const headers: http2.OutgoingHttpHeaders = {
           ":method": "POST",
           ":path": `/3/device/${token}`,
           authorization: `bearer ${getApnsJwt()}`,
-          "apns-topic": `${env.apns.bundleId}.voip`,
-          "apns-push-type": "voip",
-          "apns-priority": "10",
-          "apns-expiration": "0",
+          "apns-topic": options.topic,
+          "apns-push-type": options.pushType,
+          "apns-priority": options.priority,
           "content-type": "application/json",
-        });
+        };
+        if (options.expiration !== undefined) {
+          headers["apns-expiration"] = options.expiration;
+        }
+        const req = session.request(headers);
 
         const chunks: Buffer[] = [];
         let status = 0;
@@ -186,11 +209,12 @@ function isInvalidDeviceToken(status: number, responseBody: string): boolean {
 }
 
 /**
- * Send the same flat JSON body to each VoIP token. Does not throw on partial failure.
+ * Send the same JSON body to each token. Does not throw on partial failure.
  */
 async function sendApns(
   tokens: string[],
-  body: Record<string, string>
+  body: ApnsJsonObject,
+  options: ApnsSendOptions
 ): Promise<{ invalidTokens: string[] }> {
   const invalidTokens: string[] = [];
   if (tokens.length === 0) return { invalidTokens };
@@ -199,7 +223,7 @@ async function sendApns(
     if (!unconfiguredWarningLogged) {
       unconfiguredWarningLogged = true;
       console.warn(
-        "APNs is not configured (APNS_KEY_PATH, APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID); skipping VoIP push"
+        "APNs is not configured (APNS_KEY_PATH, APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID); skipping APNs push"
       );
     }
     return { invalidTokens };
@@ -207,18 +231,18 @@ async function sendApns(
 
   for (const token of tokens) {
     try {
-      const result = await sendApnsRequest(token, body);
+      const result = await sendApnsRequest(token, body, options);
       if (isInvalidDeviceToken(result.status, result.data)) {
         invalidTokens.push(token);
       } else if (result.status >= 400) {
-        console.error("APNs VoIP push rejected", {
+        console.error("APNs push rejected", {
           status: result.status,
           body: result.data,
           tokenPrefix: token.slice(0, 8),
         });
       }
     } catch (err) {
-      console.error("APNs VoIP push request failed", {
+      console.error("APNs push request failed", {
         err,
         tokenPrefix: token.slice(0, 8),
       });
@@ -244,5 +268,39 @@ export const sendApnsVoipPush = async (
   if (payload.address != null && payload.address !== "") {
     body.address = payload.address;
   }
-  return sendApns(tokens, body);
+  return sendApns(tokens, body, {
+    topic: `${env.apns.bundleId}.voip`,
+    pushType: "voip",
+    priority: "10",
+    expiration: "0",
+  });
+};
+
+/**
+ * Send a regular (non-VoIP) APNs alert for a call that ended without user action.
+ * Returns invalid tokens to remove from DB. Does not throw on partial failure.
+ */
+export const sendApnsCallEndedPush = async (
+  tokens: string[],
+  payload: ApnsCallEndedPayload
+): Promise<{ invalidTokens: string[] }> => {
+  const body: ApnsJsonObject = {
+    aps: {
+      alert: {
+        title: payload.title,
+        body: payload.body,
+      },
+      sound: "default",
+      "content-available": 1,
+    },
+    type: payload.type,
+    callId: payload.callId,
+    reason: payload.reason,
+  };
+  return sendApns(tokens, body, {
+    topic: env.apns.bundleId,
+    pushType: "alert",
+    priority: "10",
+    // No apns-expiration: Apple stores and delivers when the device is back online.
+  });
 };
