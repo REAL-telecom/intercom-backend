@@ -30,6 +30,9 @@ export const env = {
   callTokenTtlSec: 420,
   ringTimeoutSec: 15,
   maxCallDurationSec: 300,
+  // Caps contact lifetime if cascade delete never ran (Asterisk or backend crash mid-call).
+  // Same value as callTokenTtlSec on purpose: the call memo and the contact must expire together.
+  tempAorExpirationSec: 420,
   redisHost: process.env.REDIS_HOST ?? "127.0.0.1",
   redisPort: parsePort(process.env.REDIS_PORT ?? "6379", 6379),
   redisPassword: requireEnv("REDIS_PASSWORD"),

@@ -4,6 +4,7 @@ export {
   setCallData,
   getCallData,
   claimCallOutcome,
+  claimBridgeTeardown,
   getCallOutcome,
   addOriginateChannelId,
   getOriginateChannelIds,

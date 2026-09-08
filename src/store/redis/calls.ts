@@ -37,6 +37,15 @@ export const claimCallOutcome = async (
 };
 
 /**
+ * Atomically claim bridge teardown (SET NX). Returns true only for the first caller.
+ */
+export const claimBridgeTeardown = async (bridgeId: string, ttlSec: number): Promise<boolean> => {
+  const key = `bridge_teardown:${bridgeId}`;
+  const result = await redisClient.set(key, "1", "EX", ttlSec, "NX");
+  return result === "OK";
+};
+
+/**
  * Load claimed call outcome by callId.
  * Returns null when the call is still ringing (no outcome key).
  */

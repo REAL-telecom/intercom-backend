@@ -11,7 +11,8 @@ import {
   deletePendingOriginate,
 } from "../store/redis";
 import { createTempSipEndpoint } from "../store/postgres";
-import { hangupChannelIfExists, deleteBridge, continueInDialplan, getBridge } from "../ari/client";
+import { hangupChannelIfExists, continueInDialplan } from "../ari/client";
+import { teardownBridge } from "../calls/teardown";
 
 import type { CallData, CredentialsPayload } from "../types";
 
@@ -98,28 +99,12 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
       }
     }
     if (callData.bridgeId) {
-      try {
-        const bridgeInfo = await getBridge(callData.bridgeId);
-        let hangupFailed = false;
-        if (bridgeInfo?.channels?.length) {
-          for (const chId of bridgeInfo.channels) {
-            if (chId === channelId) continue;
-            if ((await hangupChannelIfExists(chId)) === "failed") {
-              hangupFailed = true;
-            }
-          }
-        }
-        if (hangupFailed) {
-          request.log.warn(
-            { bridgeId: callData.bridgeId },
-            "calls/end: skipping bridge delete, channel hangup failed"
-          );
-        } else {
-          await deleteBridge(callData.bridgeId);
-        }
-      } catch (err) {
-        request.log.debug({ err, bridgeId: callData.bridgeId }, "deleteBridge failed (bridge may already be gone)");
-      }
+      await teardownBridge(
+        callData.bridgeId,
+        channelId,
+        { callId, channelId, source: "calls/end" },
+        request.log
+      );
     }
     if (callData.domophoneEndpointId) {
       await clearActiveIncomingFromPanel(callData.domophoneEndpointId);

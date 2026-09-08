@@ -202,7 +202,6 @@ ufw allow ssh >> "${LOG_FILE}" 2>&1
 ufw allow 80/tcp >> "${LOG_FILE}" 2>&1
 ufw allow 443/tcp >> "${LOG_FILE}" 2>&1
 ufw allow 5060/udp >> "${LOG_FILE}" 2>&1
-ufw allow 8089/tcp >> "${LOG_FILE}" 2>&1
 ufw allow 10000:20000/udp >> "${LOG_FILE}" 2>&1
 ufw allow ${SERVER_PORT:-3000}/udp >> "${LOG_FILE}" 2>&1
 ufw allow ${SERVER_PORT:-3000}/tcp >> "${LOG_FILE}" 2>&1

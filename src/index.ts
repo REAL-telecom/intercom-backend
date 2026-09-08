@@ -6,6 +6,7 @@ import { createDatabaseSchema, sipEndpointTemplates } from "./store/postgres";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerPushRoutes } from "./routes/push";
 import { registerCallRoutes } from "./routes/calls";
+import { teardownBridge } from "./calls/teardown";
 import { handleOtpChannelDestroyed, startOtpWorker } from "./otp/worker";
 import {
   connectAriEvents,
@@ -19,10 +20,8 @@ import {
   listChannels,
   getChannelVariable,
   getBridge,
-  deleteBridge,
   deleteEndpoint,
   continueInDialplan,
-  isAriNotFound,
 } from "./ari/client";
 import {
   getPushTokenRecords,
@@ -32,7 +31,6 @@ import {
   getPanel,
   getUser,
   createTempSipEndpoint,
-  deleteTempSipEndpoint,
   getTempSipEndpoints,
 } from "./store/postgres";
 import {
@@ -122,27 +120,14 @@ const removeTemporarySipEndpoint = async (
   endpointId: string,
   logCtx: Record<string, unknown>
 ) => {
-  let deleted = true;
-  try {
-    await deleteTempSipEndpoint(endpointId);
-  } catch (err) {
-    deleted = false;
-    app.log.warn(
-      { err, endpointId, ...logCtx },
-      "Failed to delete temporary SIP endpoint from PostgreSQL"
-    );
-  }
   try {
     await deleteEndpoint(endpointId);
+    app.log.debug({ endpointId, ...logCtx }, "Temporary SIP endpoint removed");
   } catch (err) {
-    deleted = false;
     app.log.warn(
       { err, endpointId, ...logCtx },
       "Failed to delete temporary SIP endpoint from ARI"
     );
-  }
-  if (deleted) {
-    app.log.debug({ endpointId, ...logCtx }, "Temporary SIP endpoint removed");
   }
 };
 
@@ -658,33 +643,12 @@ connectAriEvents(async (event) => {
             } else {
               app.log.warn({ callId }, "No call data for call-ended push, skipping push");
             }
-            try {
-              const bridgeInfo = await getBridge(capturedBridgeId);
-              let hangupFailed = false;
-              if (bridgeInfo?.channels?.length) {
-                for (const chId of bridgeInfo.channels) {
-                  if (chId === channelId) continue;
-                  if ((await hangupChannelIfExists(chId)) === "failed") {
-                    hangupFailed = true;
-                  }
-                }
-              }
-              if (hangupFailed) {
-                app.log.warn(
-                  { bridgeId: capturedBridgeId },
-                  "Timed out: skipping bridge delete, channel hangup failed"
-                );
-              } else {
-                await deleteBridge(capturedBridgeId);
-                app.log.info({ bridgeId: capturedBridgeId }, "Timed out: bridge deleted");
-              }
-            } catch (error) {
-              if (isAriNotFound(error)) {
-                app.log.debug({ err: error, bridgeId: capturedBridgeId }, "Bridge already deleted or delete failed");
-              } else {
-                app.log.warn({ err: error, bridgeId: capturedBridgeId }, "Bridge already deleted or delete failed");
-              }
-            }
+            await teardownBridge(
+              capturedBridgeId,
+              channelId,
+              { callId, channelId, source: "Timed out" },
+              app.log
+            );
             if (callData?.domophoneEndpointId) {
               await clearActiveIncomingFromPanel(callData.domophoneEndpointId);
             }
@@ -714,32 +678,7 @@ connectAriEvents(async (event) => {
     }
     const bridgeId = callData?.bridgeId ?? channelSession?.bridgeId;
     if (bridgeId) {
-      try {
-        const bridgeInfo = await getBridge(bridgeId);
-        let hangupFailed = false;
-        if (bridgeInfo?.channels?.length) {
-          for (const chId of bridgeInfo.channels) {
-            const hangupResult = await hangupChannelIfExists(chId);
-            if (hangupResult === "hung_up") {
-              app.log.info({ channelId: chId, bridgeId }, "StasisEnd: hung up channel in bridge");
-            } else if (hangupResult === "failed") {
-              hangupFailed = true;
-            }
-          }
-        }
-        if (hangupFailed) {
-          app.log.warn({ bridgeId, channelId }, "StasisEnd: skipping bridge delete, channel hangup failed");
-        } else {
-          await deleteBridge(bridgeId);
-          app.log.info({ bridgeId, channelId }, "StasisEnd: bridge deleted");
-        }
-      } catch (error) {
-        if (isAriNotFound(error)) {
-          app.log.debug({ err: error, bridgeId, channelId }, "StasisEnd: bridge already deleted or cleanup failed");
-        } else {
-          app.log.warn({ err: error, bridgeId, channelId }, "StasisEnd: bridge already deleted or cleanup failed");
-        }
-      }
+      await teardownBridge(bridgeId, undefined, { channelId, source: "StasisEnd" }, app.log);
     } else {
       app.log.debug({ channelId }, "No bridgeId in channel session or call data, skipping bridge cleanup");
     }
@@ -793,28 +732,7 @@ connectAriEvents(async (event) => {
     if (remaining.length > 1) {
       return;
     }
-    if (remaining.length === 1) {
-      const leftoverChannelId = remaining[0];
-      if (leftoverChannelId) {
-        app.log.info({ bridgeId, leftoverChannelId }, "ChannelLeftBridge: hanging up leftover channel");
-        if ((await hangupChannelIfExists(leftoverChannelId)) === "failed") {
-          app.log.warn(
-            { bridgeId, leftoverChannelId },
-            "ChannelLeftBridge: skipping bridge delete, leftover hangup failed"
-          );
-          return;
-        }
-      }
-    }
-    try {
-      await deleteBridge(bridgeId);
-    } catch (error) {
-      if (isAriNotFound(error)) {
-        app.log.debug({ err: error, bridgeId }, "ChannelLeftBridge: bridge already deleted");
-      } else {
-        app.log.warn({ err: error, bridgeId }, "ChannelLeftBridge: failed to delete bridge");
-      }
-    }
+    await teardownBridge(bridgeId, undefined, { source: "ChannelLeftBridge" }, app.log);
   }
 });
 

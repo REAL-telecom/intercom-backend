@@ -189,8 +189,10 @@ const request = async <T = unknown>(path: string, method = "GET", body?: unknown
   }
 };
 
+// Timeouts are not retried: aborting our wait does not free Asterisk's handler, and the request may already be running.
 const isAriRetryable = (error: unknown): boolean =>
-  error instanceof AriTransportError || (error instanceof AriRequestError && error.status >= 500);
+  (error instanceof AriTransportError && !error.isTimeout) ||
+  (error instanceof AriRequestError && error.status >= 500);
 
 const requestIdempotent = async <T = unknown>(path: string, method = "GET", body?: unknown): Promise<T> => {
   let lastError: unknown;
@@ -387,7 +389,9 @@ export const getBridge = async (bridgeId: string) => {
  * Delete PJSIP endpoint from Asterisk. Missing endpoint is ignored.
  */
 export const deleteEndpoint = async (endpointId: string) => {
-  const objectTypes = ["endpoint", "auth", "aor"] as const;
+  // AOR goes first: Asterisk drops the registered contacts when the AOR is deleted.
+  // Endpoint goes last: while its row exists the cleanup job still finds the object and retries.
+  const objectTypes = ["aor", "auth", "endpoint"] as const;
   for (const objectType of objectTypes) {
     const path = `/asterisk/config/dynamic/res_pjsip/${objectType}/${encodeURIComponent(endpointId)}`;
     try {

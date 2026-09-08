@@ -67,7 +67,9 @@ export const createDatabaseSchema = async () => {
     CREATE TABLE IF NOT EXISTS ps_aors (
       id TEXT PRIMARY KEY,
       max_contacts INTEGER,
-      contact TEXT
+      contact TEXT,
+      default_expiration INTEGER,
+      maximum_expiration INTEGER
     );
   `);
   await pool.query(`
@@ -335,11 +337,11 @@ export const createTempSipEndpoint = async (params: {
   const templateId = params.templateId ?? "tpl_client";
   await pool.query(
     `
-    INSERT INTO ps_aors (id, max_contacts)
-    VALUES ($1, $2)
-    ON CONFLICT (id) DO UPDATE SET max_contacts = EXCLUDED.max_contacts;
+    INSERT INTO ps_aors (id, max_contacts, default_expiration, maximum_expiration)
+    VALUES ($1, $2, $3, $3)
+    ON CONFLICT (id) DO UPDATE SET max_contacts = EXCLUDED.max_contacts, default_expiration = EXCLUDED.default_expiration, maximum_expiration = EXCLUDED.maximum_expiration;
     `,
-    [id, maxContacts]
+    [id, maxContacts, env.tempAorExpirationSec]
   );
   await pool.query(
     `
@@ -362,15 +364,6 @@ export const createTempSipEndpoint = async (params: {
     `,
     [id, context, templateId]
   );
-};
-
-/**
- * Remove temporary PJSIP endpoint from realtime tables.
- */
-export const deleteTempSipEndpoint = async (id: string) => {
-  await pool.query(`DELETE FROM ps_endpoints WHERE id = $1`, [id]);
-  await pool.query(`DELETE FROM ps_auths WHERE id = $1`, [id]);
-  await pool.query(`DELETE FROM ps_aors WHERE id = $1`, [id]);
 };
 
 /**
