@@ -6,6 +6,9 @@ import type { FcmCallEndedPayload, FcmCallPayload } from "../types";
 
 let initialized = false;
 
+/** Missed-call ended push stays in FCM storage for one day (ms). */
+const MISSED_CALL_TTL_MS = 86_400_000;
+
 /**
  * Lazily initialize Firebase Admin SDK for FCM sending.
  */
@@ -24,13 +27,19 @@ function ensureFirebase() {
   initialized = true;
 }
 
+type FcmAndroidOptions = {
+  priority: "high" | "normal";
+  ttl: number;
+};
+
 /**
  * Send FCM data message to multiple tokens. Returns tokens for which send failed
  * (caller removes them from DB). Does not throw on partial failure.
  */
 async function sendFcm(
   tokens: string[],
-  data: Record<string, string>
+  data: Record<string, string>,
+  android: FcmAndroidOptions
 ): Promise<{ invalidTokens: string[] }> {
   const invalidTokens: string[] = [];
   if (tokens.length === 0) return { invalidTokens };
@@ -38,7 +47,10 @@ async function sendFcm(
   const message = {
     tokens,
     data,
-    android: { priority: "high" as const },
+    android: {
+      priority: android.priority,
+      ttl: android.ttl,
+    },
   };
   try {
     const batch = await admin.messaging().sendEachForMulticast(message);
@@ -58,6 +70,7 @@ async function sendFcm(
 
 /**
  * Send data-only FCM messages to Android devices (incoming call).
+ * ttl 0: do not queue if the device is offline at send time.
  * Returns invalid tokens to remove from DB. Does not throw on partial failure.
  */
 export const sendFcmPush = async (
@@ -68,28 +81,39 @@ export const sendFcmPush = async (
     type: payload.type,
     callId: payload.callId,
     sipCredentials: payload.sipCredentials,
+    address: payload.address,
   };
-  if (payload.address != null && payload.address !== "") {
-    data.address = payload.address;
-  }
-  return sendFcm(tokens, data);
+  return sendFcm(tokens, data, { priority: "high", ttl: 0 });
 };
 
 /**
- * Send data-only FCM "call ended". Returns invalid tokens to remove from DB.
- * reason lets the app distinguish a missed call (timeout) from dismissing the incoming screen (caller hung up). Sent only for timeout and canceled outcomes.
+ * Send data-only FCM "call ended".
+ * Missed (title+body): high priority, live one day. Silent: normal priority, ttl 0.
+ * Returns invalid tokens to remove from DB. Does not throw on partial failure.
  */
 export const sendFcmCallEnded = async (
   tokens: string[],
   payload: FcmCallEndedPayload
 ): Promise<{ invalidTokens: string[] }> => {
+  const hasBanner =
+    payload.title != null &&
+    payload.title !== "" &&
+    payload.body != null &&
+    payload.body !== "";
   const data: Record<string, string> = {
     type: payload.type,
     callId: payload.callId,
-    address: payload.address,
     reason: payload.reason,
-    title: payload.title,
-    body: payload.body,
   };
-  return sendFcm(tokens, data);
+  if (payload.address != null && payload.address !== "") {
+    data.address = payload.address;
+  }
+  if (hasBanner) {
+    data.title = payload.title!;
+    data.body = payload.body!;
+  }
+  return sendFcm(tokens, data, {
+    priority: hasBanner ? "high" : "normal",
+    ttl: hasBanner ? MISSED_CALL_TTL_MS : 0,
+  });
 };

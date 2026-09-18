@@ -264,10 +264,8 @@ export const sendApnsVoipPush = async (
     type: payload.type,
     callId: payload.callId,
     sipCredentials: payload.sipCredentials,
+    address: payload.address,
   };
-  if (payload.address != null && payload.address !== "") {
-    body.address = payload.address;
-  }
   return sendApns(tokens, body, {
     topic: `${env.apns.bundleId}.voip`,
     pushType: "voip",
@@ -277,30 +275,48 @@ export const sendApnsVoipPush = async (
 };
 
 /**
- * Send a regular (non-VoIP) APNs alert for a call that ended without user action.
+ * Send a regular (non-VoIP) APNs message for call ended.
+ * Missed (title+body): alert, live one day. Silent: background, expiration 0.
  * Returns invalid tokens to remove from DB. Does not throw on partial failure.
  */
 export const sendApnsCallEndedPush = async (
   tokens: string[],
   payload: ApnsCallEndedPayload
 ): Promise<{ invalidTokens: string[] }> => {
-  const body: ApnsJsonObject = {
-    aps: {
-      alert: {
-        title: payload.title,
-        body: payload.body,
-      },
-      sound: "default",
-      "content-available": 1,
-    },
-    type: payload.type,
-    callId: payload.callId,
-    reason: payload.reason,
-  };
+  const hasBanner =
+    payload.title != null &&
+    payload.title !== "" &&
+    payload.body != null &&
+    payload.body !== "";
+  const body: ApnsJsonObject = hasBanner
+    ? {
+        aps: {
+          alert: {
+            title: payload.title!,
+            body: payload.body!,
+          },
+          sound: "default",
+          "content-available": 1,
+        },
+        type: payload.type,
+        callId: payload.callId,
+        reason: payload.reason,
+      }
+    : {
+        aps: {
+          "content-available": 1,
+        },
+        type: payload.type,
+        callId: payload.callId,
+        reason: payload.reason,
+      };
+  const expiration = hasBanner
+    ? String(Math.floor(Date.now() / 1000) + 86_400)
+    : "0";
   return sendApns(tokens, body, {
     topic: env.apns.bundleId,
-    pushType: "alert",
-    priority: "10",
-    // No apns-expiration: Apple stores and delivers when the device is back online.
+    pushType: hasBanner ? "alert" : "background",
+    priority: hasBanner ? "10" : "5",
+    expiration,
   });
 };

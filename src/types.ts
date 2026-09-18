@@ -60,17 +60,25 @@ export type FcmCallPayload = {
   type: "SIP_CALL";
   callId: string;
   sipCredentials: string;
-  address?: string;
+  address: string;
 };
 
-/** FCM data message payload for "call ended" push. */
+/** Push reason for SIP_CALL_ENDED. Separate from Redis CallOutcome (dial outcome). */
+export type CallEndedReason =
+  | "timeout"
+  | "caller_hung_up"
+  | "answered_elsewhere"
+  | "declined_elsewhere"
+  | "ended";
+
+/** FCM data message payload for "call ended" push. title/body only for missed-call banner. */
 export type FcmCallEndedPayload = {
   type: "SIP_CALL_ENDED";
   callId: string;
-  address: string;
-  reason: "timeout" | "caller_hung_up";
-  title: string;
-  body: string;
+  address?: string;
+  reason: CallEndedReason;
+  title?: string;
+  body?: string;
 };
 
 /** APNs VoIP payload for incoming call push (flat string values, same keys as FCM data). */
@@ -78,16 +86,16 @@ export type ApnsVoipCallPayload = {
   type: "SIP_CALL";
   callId: string;
   sipCredentials: string;
-  address?: string;
+  address: string;
 };
 
-/** APNs alert payload for "call ended" push (regular APNs, not PushKit). */
+/** APNs payload for "call ended" push (regular APNs, not PushKit). title/body only for missed. */
 export type ApnsCallEndedPayload = {
   type: "SIP_CALL_ENDED";
   callId: string;
-  reason: "timeout" | "caller_hung_up";
-  title: string;
-  body: string;
+  reason: CallEndedReason;
+  title?: string;
+  body?: string;
 };
 
 /** Stored push token with platform (android FCM, ios_voip, or ios_apns). */

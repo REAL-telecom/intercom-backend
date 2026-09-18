@@ -7,7 +7,7 @@ import type { FastifyBaseLogger } from "fastify";
 export type TeardownBridgeLog = {
   callId?: string;
   channelId?: string;
-  source: "ChannelLeftBridge" | "StasisEnd" | "Timed out" | "calls/end";
+  source: "channelLeftBridge" | "stasisEnd" | "timedOut" | "callsEnd" | "setupFailed";
 };
 
 /**

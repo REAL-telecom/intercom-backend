@@ -59,6 +59,20 @@ export const getCallOutcome = async (callId: string): Promise<CallOutcome | null
 };
 
 /**
+ * Atomically claim one call-ended push per callId+reason (SET NX).
+ * Returns true only for the first sender of that reason.
+ */
+export const claimCallOverPush = async (
+  callId: string,
+  reason: string,
+  ttlSec: number
+): Promise<boolean> => {
+  const key = `call_over_push:${callId}:${reason}`;
+  const result = await redisClient.set(key, "1", "EX", ttlSec, "NX");
+  return result === "OK";
+};
+
+/**
  * Add ARI id of an originated PJSIP leg to the set with TTL.
  * Key is originate_channels (plural) so it does not collide with the string key originate_channel.
  */

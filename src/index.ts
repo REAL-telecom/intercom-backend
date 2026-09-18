@@ -54,8 +54,9 @@ import {
   setActiveIncomingFromPanel,
   clearActiveIncomingFromPanel,
 } from "./store/redis";
-import { sendFcmCallEnded, sendFcmPush } from "./push/fcm";
-import { sendApnsCallEndedPush, sendApnsVoipPush } from "./push/apns";
+import { sendFcmPush } from "./push/fcm";
+import { sendApnsVoipPush } from "./push/apns";
+import { callOutcomeToEndedReason, notifyCallOver } from "./push/notifyCallOver";
 import crypto from "crypto";
 
 import type { ChannelSession, CallData } from "./types";
@@ -131,117 +132,6 @@ const removeTemporarySipEndpoint = async (
   }
 };
 
-const CALL_ENDED_PUSH_TITLE = "Пропущенный вызов";
-const CALL_ENDED_PUSH_BODY_DEFAULT = "Домофон";
-
-/**
- * Notify devices that the call ended without user action (timeout or canceled).
- * Android gets FCM; iPhone gets a regular (non-VoIP) APNs alert.
- */
-const sendCallEndedPush = async (
-  callId: string,
-  callData: CallData,
-  reason: "timeout" | "caller_hung_up"
-) => {
-  try {
-    const userId = callData.userId ?? null;
-    if (userId === null) {
-      app.log.warn(
-        {
-          callId,
-          reason,
-          domophoneEndpointId: callData.domophoneEndpointId,
-          apartment: callData.apartment,
-        },
-        "No user mapping for call-ended push, skipping push"
-      );
-      return;
-    }
-
-    const records = await getPushTokenRecords(userId);
-    const androidTokens = records.filter((r) => r.platform === "android").map((r) => r.pushToken);
-    const iosApnsTokens = records.filter((r) => r.platform === "ios_apns").map((r) => r.pushToken);
-    if (androidTokens.length === 0 && iosApnsTokens.length === 0) {
-      app.log.warn(
-        { callId, reason, userId },
-        "No push tokens for call-ended push, skipping push"
-      );
-      return;
-    }
-
-    const address = callData.address ?? "";
-    const body =
-      callData.address != null && callData.address !== ""
-        ? callData.address
-        : CALL_ENDED_PUSH_BODY_DEFAULT;
-    const title = CALL_ENDED_PUSH_TITLE;
-    const invalidTokens: string[] = [];
-    let fcmInvalidCount = 0;
-    let apnsInvalidCount = 0;
-
-    if (androidTokens.length > 0) {
-      app.log.info(
-        { callId, reason, tokensCount: androidTokens.length },
-        "Sending FCM call-ended push"
-      );
-      try {
-        const { invalidTokens: fcmInvalid } = await sendFcmCallEnded(androidTokens, {
-          type: "SIP_CALL_ENDED",
-          callId,
-          address,
-          reason,
-          title,
-          body,
-        });
-        fcmInvalidCount = fcmInvalid.length;
-        invalidTokens.push(...fcmInvalid);
-        app.log.info({ callId }, "FCM call-ended push sent");
-      } catch (error) {
-        app.log.warn({ err: error, callId, reason }, "Failed to send FCM call-ended push");
-      }
-    }
-
-    if (iosApnsTokens.length > 0) {
-      app.log.info(
-        { callId, reason, tokensCount: iosApnsTokens.length },
-        "Sending APNs call-ended push"
-      );
-      try {
-        const { invalidTokens: apnsInvalid } = await sendApnsCallEndedPush(iosApnsTokens, {
-          type: "SIP_CALL_ENDED",
-          callId,
-          reason,
-          title,
-          body,
-        });
-        apnsInvalidCount = apnsInvalid.length;
-        invalidTokens.push(...apnsInvalid);
-        app.log.info({ callId }, "APNs call-ended push sent");
-      } catch (error) {
-        app.log.warn({ err: error, callId, reason }, "Failed to send APNs call-ended push");
-      }
-    }
-
-    if (invalidTokens.length > 0) {
-      await deletePushTokens(userId, invalidTokens);
-      if (fcmInvalidCount > 0) {
-        app.log.info(
-          { callId, userId, removedCount: fcmInvalidCount },
-          "Removed invalid FCM tokens from DB (call-ended)"
-        );
-      }
-      if (apnsInvalidCount > 0) {
-        app.log.info(
-          { callId, userId, removedCount: apnsInvalidCount },
-          "Removed invalid APNs tokens from DB (call-ended)"
-        );
-      }
-    }
-  } catch (error) {
-    app.log.warn({ err: error, callId, reason }, "Failed to send call-ended push");
-  }
-};
-
 connectAriEvents(async (event) => {
   // Log all events for debugging
   app.log.info({ eventType: event.type, fullEvent: JSON.stringify(event, null, 2) }, "ARI event received");
@@ -311,6 +201,20 @@ connectAriEvents(async (event) => {
             return;
           }
           app.log.info({ callId: callIdForStatus }, "Call marked as accepted (timeout will not hang up)");
+          const acceptedCallData = await getCallData<CallData>(callIdForStatus);
+          if (acceptedCallData) {
+            await notifyCallOver(
+              callIdForStatus,
+              acceptedCallData,
+              "answered_elsewhere",
+              app.log
+            );
+          } else {
+            app.log.warn(
+              { callId: callIdForStatus },
+              "No call data for answered_elsewhere push, skipping push"
+            );
+          }
         } else {
           app.log.warn(
             { channelId, args: event.args },
@@ -495,12 +399,14 @@ connectAriEvents(async (event) => {
       app.log.info({ endpointId }, "Temporary SIP endpoint created");
       await setEndpointSession(endpointId, { type: "incoming" }, env.callTokenTtlSec);
 
-      // Bridge and originate: same logic as previously in GET /calls/credentials
+      // Bridge and originate: same logic as previously in GET /calls/credentials.
+      // bridgeId is set only after full setup so ring push and ring timeout never run on a failed room.
       let bridgeId: string | undefined;
+      let createdBridgeId: string | undefined;
       try {
         app.log.info({ callId, channelId, endpointId }, "STEP 1: Creating bridge and setting up originate");
         const bridge = await createBridge();
-        bridgeId = bridge.id;
+        createdBridgeId = bridge.id;
         app.log.info({ bridgeId: bridge.id, channelId }, "STEP 2: Bridge created, adding incoming domophone channel");
         await new Promise((r) => setTimeout(r, 300));
         await addChannelToBridge(bridge.id, channelId);
@@ -533,13 +439,52 @@ connectAriEvents(async (event) => {
 
         await setPendingOriginate(endpointId, { bridgeId: bridge.id, channelId }, env.ringTimeoutSec);
         app.log.info({ endpointId, bridgeId: bridge.id }, "STEP 4: Pending originate stored, waiting for endpoint registration.");
+        bridgeId = bridge.id;
       } catch (error) {
         app.log.error({ err: error, callId, channelId, endpointId }, "CRITICAL: Failed to setup bridge/originate - call will not connect");
+        if (domophoneEndpointId) {
+          try {
+            await clearActiveIncomingFromPanel(domophoneEndpointId);
+            app.log.info(
+              { callId, panelId: domophoneEndpointId, channelId },
+              "Setup failed: cleared active incoming panel lock"
+            );
+          } catch (clearError) {
+            app.log.warn(
+              { err: clearError, callId, panelId: domophoneEndpointId, channelId },
+              "Setup failed: failed to clear active incoming panel lock"
+            );
+          }
+        }
+        if (createdBridgeId) {
+          await teardownBridge(
+            createdBridgeId,
+            channelId,
+            { callId, channelId, source: "setupFailed" },
+            app.log
+          );
+        }
+        await removeTemporarySipEndpoint(endpointId, { callId, channelId, source: "setupFailed" });
+        await hangupChannelIfExists(channelId);
       }
 
+      // Ring push + ring timeout only when the room was fully assembled.
+      if (bridgeId) {
       if (userId === null) {
         app.log.warn({ callId, domophoneEndpointId, panelIp, apartment }, "No user mapping for incoming call, skipping push");
+      } else if (!address) {
+        app.log.warn(
+          { callId, domophoneEndpointId, panelIp, apartment, userId },
+          "No address for incoming call, skipping push"
+        );
       } else {
+        const outcomeBeforeRingPush = await getCallOutcome(callId);
+        if (outcomeBeforeRingPush !== null) {
+          app.log.info(
+            { callId, outcome: outcomeBeforeRingPush },
+            "Skipping ring push: call outcome already claimed"
+          );
+        } else {
         const records = await getPushTokenRecords(userId);
         app.log.info({ tokensCount: records.length, userId }, "Push tokens retrieved");
         if (records.length === 0) {
@@ -552,33 +497,43 @@ connectAriEvents(async (event) => {
           type: "SIP_CALL" as const,
           callId,
           sipCredentials: JSON.stringify(sipCredentials),
-          ...(address ? { address } : {}),
+          address,
         };
         const invalidTokens: string[] = [];
         let fcmInvalidCount = 0;
         let apnsInvalidCount = 0;
+        const ringPushTasks: Promise<void>[] = [];
         if (androidTokens.length > 0) {
         app.log.info({ callId, tokensCount: androidTokens.length }, "Sending FCM push (call, data-only)");
-        try {
-          const { invalidTokens: fcmInvalid } = await sendFcmPush(androidTokens, callPayload);
-          fcmInvalidCount = fcmInvalid.length;
-          invalidTokens.push(...fcmInvalid);
-          app.log.info({ callId, tokensCount: androidTokens.length }, "FCM push (call) sent");
-        } catch (pushError) {
-          app.log.error({ err: pushError, callId }, "FCM push failed, continuing call setup (timeout will still run)");
-        }
+        ringPushTasks.push(
+          (async () => {
+            try {
+              const { invalidTokens: fcmInvalid } = await sendFcmPush(androidTokens, callPayload);
+              fcmInvalidCount = fcmInvalid.length;
+              invalidTokens.push(...fcmInvalid);
+              app.log.info({ callId, tokensCount: androidTokens.length }, "FCM push (call) sent");
+            } catch (pushError) {
+              app.log.error({ err: pushError, callId }, "FCM push failed, continuing call setup (timeout will still run)");
+            }
+          })()
+        );
         }
         if (iosVoipTokens.length > 0) {
         app.log.info({ callId, tokensCount: iosVoipTokens.length }, "Sending APNs VoIP push (call)");
-        try {
-          const { invalidTokens: apnsInvalid } = await sendApnsVoipPush(iosVoipTokens, callPayload);
-          apnsInvalidCount = apnsInvalid.length;
-          invalidTokens.push(...apnsInvalid);
-          app.log.info({ callId, tokensCount: iosVoipTokens.length }, "APNs VoIP push (call) sent");
-        } catch (pushError) {
-          app.log.error({ err: pushError, callId }, "APNs VoIP push failed, continuing call setup (timeout will still run)");
+        ringPushTasks.push(
+          (async () => {
+            try {
+              const { invalidTokens: apnsInvalid } = await sendApnsVoipPush(iosVoipTokens, callPayload);
+              apnsInvalidCount = apnsInvalid.length;
+              invalidTokens.push(...apnsInvalid);
+              app.log.info({ callId, tokensCount: iosVoipTokens.length }, "APNs VoIP push (call) sent");
+            } catch (pushError) {
+              app.log.error({ err: pushError, callId }, "APNs VoIP push failed, continuing call setup (timeout will still run)");
+            }
+          })()
+        );
         }
-        }
+        await Promise.all(ringPushTasks);
           if (invalidTokens.length > 0) {
             await deletePushTokens(userId, invalidTokens);
             if (fcmInvalidCount > 0) {
@@ -588,11 +543,23 @@ connectAriEvents(async (event) => {
               app.log.info({ callId, userId, removedCount: apnsInvalidCount }, "Removed invalid APNs tokens from DB");
             }
           }
+          const outcomeAfterRingPush = await getCallOutcome(callId);
+          const endedReasonAfterRing = callOutcomeToEndedReason(outcomeAfterRingPush);
+          if (endedReasonAfterRing !== null) {
+            const callDataAfterRing = await getCallData<CallData>(callId);
+            if (callDataAfterRing) {
+              app.log.info(
+                { callId, outcome: outcomeAfterRingPush, reason: endedReasonAfterRing },
+                "Call ended while ring push was in flight; sending call-ended push"
+              );
+              await notifyCallOver(callId, callDataAfterRing, endedReasonAfterRing, app.log);
+            }
+          }
+        }
         }
       }
 
       // If nobody answers, auto-end the call on backend after ring timeout.
-      if (bridgeId) {
         const capturedBridgeId = bridgeId;
         void (async () => {
           try {
@@ -639,14 +606,14 @@ connectAriEvents(async (event) => {
               }
             }
             if (callData) {
-              await sendCallEndedPush(callId, callData, "timeout");
+              await notifyCallOver(callId, callData, "timeout", app.log);
             } else {
               app.log.warn({ callId }, "No call data for call-ended push, skipping push");
             }
             await teardownBridge(
               capturedBridgeId,
               channelId,
-              { callId, channelId, source: "Timed out" },
+              { callId, channelId, source: "timedOut" },
               app.log
             );
             if (callData?.domophoneEndpointId) {
@@ -656,8 +623,6 @@ connectAriEvents(async (event) => {
             app.log.warn({ err: error, callId }, "Failed to auto-end timed out call");
           }
         })();
-      } else {
-        app.log.warn({ callId, channelId }, "No bridgeId available, skipping timeout setup");
       }
     } catch (error) {
       app.log.error({ err: error }, "Failed to handle StasisStart");
@@ -678,7 +643,7 @@ connectAriEvents(async (event) => {
     }
     const bridgeId = callData?.bridgeId ?? channelSession?.bridgeId;
     if (bridgeId) {
-      await teardownBridge(bridgeId, undefined, { channelId, source: "StasisEnd" }, app.log);
+      await teardownBridge(bridgeId, undefined, { channelId, source: "stasisEnd" }, app.log);
     } else {
       app.log.debug({ channelId }, "No bridgeId in channel session or call data, skipping bridge cleanup");
     }
@@ -711,7 +676,12 @@ connectAriEvents(async (event) => {
       }
 
       if (claimed) {
-        await sendCallEndedPush(callId, callData, "caller_hung_up");
+        await notifyCallOver(callId, callData, "caller_hung_up", app.log);
+      } else {
+        const outcome = await getCallOutcome(callId);
+        if (outcome === "accepted") {
+          await notifyCallOver(callId, callData, "ended", app.log);
+        }
       }
 
       if (callData.domophoneEndpointId) {
@@ -732,7 +702,7 @@ connectAriEvents(async (event) => {
     if (remaining.length > 1) {
       return;
     }
-    await teardownBridge(bridgeId, undefined, { source: "ChannelLeftBridge" }, app.log);
+    await teardownBridge(bridgeId, undefined, { source: "channelLeftBridge" }, app.log);
   }
 });
 

@@ -13,6 +13,7 @@ import {
 import { createTempSipEndpoint } from "../store/postgres";
 import { hangupChannelIfExists, continueInDialplan } from "../ari/client";
 import { teardownBridge } from "../calls/teardown";
+import { notifyCallOver } from "../push/notifyCallOver";
 
 import type { CallData, CredentialsPayload } from "../types";
 
@@ -70,6 +71,9 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
     const channelId = callData.channelId;
     const claimed = await claimCallOutcome(callId, "rejected", env.callTokenTtlSec);
     request.log.info({ callId, claimed }, "calls/end: claimed rejected outcome");
+    if (claimed) {
+      await notifyCallOver(callId, callData, "declined_elsewhere", request.log);
+    }
     if (callData.endpointId) {
       try {
         await deletePendingOriginate(callData.endpointId);
@@ -102,7 +106,7 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
       await teardownBridge(
         callData.bridgeId,
         channelId,
-        { callId, channelId, source: "calls/end" },
+        { callId, channelId, source: "callsEnd" },
         request.log
       );
     }

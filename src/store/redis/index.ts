@@ -6,6 +6,7 @@ export {
   claimCallOutcome,
   claimBridgeTeardown,
   getCallOutcome,
+  claimCallOverPush,
   addOriginateChannelId,
   getOriginateChannelIds,
   claimContactForDial,
