@@ -11,6 +11,8 @@ User=asterisk
 Group=asterisk
 ExecStart=/usr/sbin/asterisk -mqf -C /etc/asterisk/asterisk.conf
 ExecStartPre=+/bin/bash -c '[ ! -d "/var/run/asterisk" ] && /bin/mkdir /var/run/asterisk ; /bin/chown -R asterisk:asterisk /var/{lib,log,run,spool}/asterisk'
+# Realtime Multifon registration can race Postgres/docker; nudge REGISTER after start.
+ExecStartPost=+/bin/bash -c 'for i in 1 2 3 4 5 6 7 8 9 10; do sleep 2; /usr/sbin/asterisk -rx "pjsip send register multifon-registration" >/dev/null 2>&1 || true; /usr/sbin/asterisk -rx "pjsip show registrations" 2>/dev/null | grep -q Registered && exit 0; done; exit 0'
 ExecStop=/usr/sbin/asterisk -rx 'core stop now'
 NoNewPrivileges=yes
 ProtectSystem=strict

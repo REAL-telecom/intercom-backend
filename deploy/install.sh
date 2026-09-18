@@ -7,8 +7,12 @@ CONFIG_DIR="${ROOT_DIR}/configs"
 LOG_DIR="/opt/intercom-backend"
 LOG_FILE="${LOG_DIR}/install.log"
 FIREBASE_JSON_FILE=$(ls "${ROOT_DIR}"/*-firebase-adminsdk-*.json 2>/dev/null | head -n1) || true
-ASTERISK_MAJOR="22"
-ASTERISK_TARBALL="asterisk-${ASTERISK_MAJOR}-current.tar.gz"
+# Так можно ставить последнюю версию ветки 22, но мы ставим конкретную:
+# на ней протестирована работа сервера. Новую версию — только после прогона.
+# ASTERISK_MAJOR="22"
+# ASTERISK_TARBALL="asterisk-${ASTERISK_MAJOR}-current.tar.gz"
+ASTERISK_VERSION="22.11.0"
+ASTERISK_TARBALL="asterisk-${ASTERISK_VERSION}.tar.gz"
 NPM_VERSION="11.12.1"
 
 if [[ -t 1 ]]; then
@@ -257,7 +261,7 @@ else
 cd /usr/src
 run_with_spinner "Скачивание дистрибутива" "wget -q http://downloads.asterisk.org/pub/telephony/asterisk/${ASTERISK_TARBALL}"
 run_with_spinner "Распаковка дистрибутива" "tar xvf ${ASTERISK_TARBALL}"
-cd asterisk-${ASTERISK_MAJOR}.*
+cd "asterisk-${ASTERISK_VERSION}"
 wait_for_apt_idle
 run_with_spinner "Установка зависимостей" "./contrib/scripts/install_prereq install"
 run_with_spinner "Конфигурирование компонентов" "./configure --with-jansson-bundled"
@@ -598,8 +602,8 @@ apt-get -y clean >> "${LOG_FILE}" 2>&1
 cleanup_ok=1
 
 echo "Удаление исходников Asterisk..."
-rm -rf "/usr/src/asterisk-${ASTERISK_MAJOR}.*" "/usr/src/${ASTERISK_TARBALL}"
-if ls "/usr/src/asterisk-${ASTERISK_MAJOR}.*" >/dev/null 2>&1 || ls "/usr/src/${ASTERISK_TARBALL}" >/dev/null 2>&1; then
+rm -rf "/usr/src/asterisk-${ASTERISK_VERSION}" "/usr/src/${ASTERISK_TARBALL}"
+if ls "/usr/src/asterisk-${ASTERISK_VERSION}" >/dev/null 2>&1 || ls "/usr/src/${ASTERISK_TARBALL}" >/dev/null 2>&1; then
   src_ok=0
 else
   src_ok=1

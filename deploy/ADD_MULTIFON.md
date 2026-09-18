@@ -84,9 +84,15 @@ ON CONFLICT (id) DO UPDATE SET
 
 **Registration**
 
+`max_retries=0` у Asterisk 22 **не** означает unlimited — при фейле сразу стоп. Ставим большое число. `auth_rejection_permanent=no` — не залипать навсегда после провала auth challenge. `fatal_retry_interval` / `forbidden_retry_interval` — пауза перед повтором после фатальных/403 ответов.
+
 ```bash
 docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
-INSERT INTO ps_registrations (id, transport, outbound_auth, server_uri, client_uri, expiration, retry_interval)
+INSERT INTO ps_registrations (
+  id, transport, outbound_auth, server_uri, client_uri,
+  expiration, retry_interval, max_retries,
+  auth_rejection_permanent, fatal_retry_interval, forbidden_retry_interval
+)
 VALUES (
   'multifon-registration',
   'transport-udp',
@@ -94,7 +100,11 @@ VALUES (
   'sip:sbc.megafon.ru:5060',
   'sip:${MULTIFON_PHONE}@multifon.ru',
   180,
-  60
+  10,
+  1000000,
+  'no',
+  10,
+  10
 )
 ON CONFLICT (id) DO UPDATE SET
   transport = EXCLUDED.transport,
@@ -102,7 +112,11 @@ ON CONFLICT (id) DO UPDATE SET
   server_uri = EXCLUDED.server_uri,
   client_uri = EXCLUDED.client_uri,
   expiration = EXCLUDED.expiration,
-  retry_interval = EXCLUDED.retry_interval;
+  retry_interval = EXCLUDED.retry_interval,
+  max_retries = EXCLUDED.max_retries,
+  auth_rejection_permanent = EXCLUDED.auth_rejection_permanent,
+  fatal_retry_interval = EXCLUDED.fatal_retry_interval,
+  forbidden_retry_interval = EXCLUDED.forbidden_retry_interval;
 "
 ```
 
@@ -114,7 +128,9 @@ SELECT id, username, realm FROM ps_auths WHERE id = 'multifon-auth';
 "
 
 docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
-SELECT id, server_uri, client_uri, expiration FROM ps_registrations WHERE id = 'multifon-registration';
+SELECT id, server_uri, client_uri, expiration, retry_interval, max_retries,
+       auth_rejection_permanent, fatal_retry_interval, forbidden_retry_interval
+FROM ps_registrations WHERE id = 'multifon-registration';
 "
 ```
 
