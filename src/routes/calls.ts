@@ -1,18 +1,17 @@
 import { FastifyInstance } from "fastify";
 import crypto from "crypto";
-import { env } from "../config/env";
+import { env } from "../config";
 import {
   setCallData,
   setEndpointSession,
   getCallData,
-  claimCallOutcome,
-  getOriginateChannelIds,
-  clearActiveIncomingFromPanel,
+  setDialStatus,
+  listDialedChannels,
+  deleteCallingPanel,
   deletePendingOriginate,
 } from "../store/redis";
-import { createTempSipEndpoint } from "../store/postgres";
-import { hangupChannelIfExists, continueInDialplan } from "../ari/client";
-import { teardownBridge } from "../calls/teardown";
+import { hangupChannel, continueInDialplan, createEndpoint } from "../ari";
+import { cleanupBridge } from "../calls/cleanup";
 import { notifyCallOver } from "../push/notifyCallOver";
 
 import type { CallData, CredentialsPayload } from "../types";
@@ -29,12 +28,11 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
     const sipUsername = endpointId;
     const sipPassword = crypto.randomBytes(8).toString("hex");
 
-    await createTempSipEndpoint({
-      id: endpointId,
-      username: sipUsername,
-      password: sipPassword,
+    await createEndpoint({
       context: "intercom",
-      templateId: "tpl_client",
+      id: endpointId,
+      password: sipPassword,
+      username: sipUsername,
     });
 
     const payload: CredentialsPayload = {
@@ -69,7 +67,7 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
       return reply.code(404).send({ error: "Call not found or already ended" });
     }
     const channelId = callData.channelId;
-    const claimed = await claimCallOutcome(callId, "rejected", env.callTokenTtlSec);
+    const claimed = await setDialStatus(callId, "rejected", env.callTokenTtlSec);
     request.log.info({ callId, claimed }, "calls/end: claimed rejected outcome");
     if (claimed) {
       await notifyCallOver(callId, callData, "declined_elsewhere", request.log);
@@ -93,9 +91,9 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
     } catch (err) {
       request.log.warn({ err, channelId, callId }, "continueInDialplan failed (channel may already be down)");
     }
-    const originateChannelIds = await getOriginateChannelIds(callId);
+    const originateChannelIds = await listDialedChannels(callId);
     for (const originateChannelId of originateChannelIds) {
-      if ((await hangupChannelIfExists(originateChannelId)) === "hung_up") {
+      if ((await hangupChannel(originateChannelId, request.log)) === "hungUp") {
         request.log.info(
           { callId, originateChannelId },
           "calls/end: hung up originate channel"
@@ -103,7 +101,7 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
       }
     }
     if (callData.bridgeId) {
-      await teardownBridge(
+      await cleanupBridge(
         callData.bridgeId,
         channelId,
         { callId, channelId, source: "callsEnd" },
@@ -111,7 +109,7 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
       );
     }
     if (callData.domophoneEndpointId) {
-      await clearActiveIncomingFromPanel(callData.domophoneEndpointId);
+      await deleteCallingPanel(callData.domophoneEndpointId);
     }
     return reply.code(204).send();
   });

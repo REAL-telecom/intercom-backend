@@ -3,15 +3,13 @@ export { redisClient } from "./client";
 export {
   setCallData,
   getCallData,
-  claimCallOutcome,
-  claimBridgeTeardown,
-  getCallOutcome,
-  claimCallOverPush,
-  addOriginateChannelId,
-  getOriginateChannelIds,
-  claimContactForDial,
-  releaseContactForDial,
-  getCallIdByEndpointId,
+  getCallId,
+  setDialStatus,
+  getDialStatus,
+  addDialedChannel,
+  listDialedChannels,
+  addDialedContact,
+  removeDialedContact,
   setEndpointSession,
   getEndpointSession,
   setChannelSession,
@@ -19,12 +17,15 @@ export {
   setPendingOriginate,
   getPendingOriginate,
   deletePendingOriginate,
-  setActiveIncomingFromPanel,
-  getActiveIncomingFromPanel,
-  clearActiveIncomingFromPanel,
+  setCallingPanel,
+  getCallingPanel,
+  deleteCallingPanel,
+  clearCallData,
+  acquireBridgeCleanup,
+  acquireCallOverPush,
 } from "./calls";
 
-export type { CallOutcome } from "./calls";
+export type { DialStatus } from "./calls";
 
 export { setOtp, getOtp, deleteOtp } from "./otp/codes";
 

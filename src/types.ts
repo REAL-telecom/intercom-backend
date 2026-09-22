@@ -63,7 +63,7 @@ export type FcmCallPayload = {
   address: string;
 };
 
-/** Push reason for SIP_CALL_ENDED. Separate from Redis CallOutcome (dial outcome). */
+/** Push reason for SIP_CALL_ENDED. Separate from Redis DialStatus (dial status). */
 export type CallEndedReason =
   | "timeout"
   | "caller_hung_up"

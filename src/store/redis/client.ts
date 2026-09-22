@@ -1,5 +1,5 @@
 import Redis from "ioredis";
-import { env } from "../../config/env";
+import { env } from "../../config";
 
 const createRedis = () =>
   new Redis({

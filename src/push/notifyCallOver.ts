@@ -1,6 +1,6 @@
-import { env } from "../config/env";
-import { claimCallOverPush } from "../store/redis";
-import { getPushTokenRecords, deletePushTokens } from "../store/postgres";
+import { env } from "../config";
+import { acquireCallOverPush } from "../store/redis";
+import { listPushTokens, removePushTokens } from "../store/postgres";
 import { sendFcmCallEnded } from "./fcm";
 import { sendApnsCallEndedPush } from "./apns";
 
@@ -20,12 +20,12 @@ const MISSED_REASONS: ReadonlySet<CallEndedReason> = new Set([
  * Returns null when there is no outcome yet.
  */
 export const callOutcomeToEndedReason = (
-  outcome: "accepted" | "rejected" | "timeout" | "canceled" | null
+  outcome: "accepted" | "rejected" | "timedOut" | "canceled" | null
 ): CallEndedReason | null => {
   if (outcome === null) return null;
   if (outcome === "accepted") return "answered_elsewhere";
   if (outcome === "rejected") return "declined_elsewhere";
-  if (outcome === "timeout") return "timeout";
+  if (outcome === "timedOut") return "timeout";
   return "caller_hung_up";
 };
 
@@ -40,8 +40,8 @@ export const notifyCallOver = async (
   logger: FastifyBaseLogger
 ): Promise<void> => {
   try {
-    const claimed = await claimCallOverPush(callId, reason, env.callTokenTtlSec);
-    if (!claimed) {
+    const shouldNotify = await acquireCallOverPush(callId, reason, env.callTokenTtlSec);
+    if (!shouldNotify) {
       logger.debug({ callId, reason }, "Call-over push already sent for this reason, skipping");
       return;
     }
@@ -60,7 +60,7 @@ export const notifyCallOver = async (
       return;
     }
 
-    const records = await getPushTokenRecords(userId);
+    const records = await listPushTokens(userId);
     const androidTokens = records.filter((r) => r.platform === "android").map((r) => r.pushToken);
     const iosApnsTokens = records.filter((r) => r.platform === "ios_apns").map((r) => r.pushToken);
     if (androidTokens.length === 0 && iosApnsTokens.length === 0) {
@@ -149,7 +149,7 @@ export const notifyCallOver = async (
     await Promise.all(tasks);
 
     if (invalidTokens.length > 0) {
-      await deletePushTokens(userId, invalidTokens);
+      await removePushTokens(userId, invalidTokens);
       if (fcmInvalidCount > 0) {
         logger.info(
           { callId, userId, removedCount: fcmInvalidCount },

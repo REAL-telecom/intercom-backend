@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { FastifyInstance } from "fastify";
+import { logFail2banLine } from "../fail2ban";
 import { getOrCreateUser } from "../store/postgres";
 import {
   blockOtpRequestByIp,
@@ -49,25 +50,7 @@ const MSG_REQUEST_ACCEPTED = "Запрос на звонок принят";
 const MSG_REQUEST_QUEUED = "Запрос в очереди";
 
 
-type LogLevel = "info" | "warn";
-
 const nowUnixSec = (): number => Math.floor(Date.now() / 1000);
-
-/**
- * Write auth log line in a fail2ban-friendly format.
- */
-const logAuthLine = (
-  app: FastifyInstance,
-  level: LogLevel,
-  tag: string,
-  message: string,
-  ip: string,
-  phone: string,
-  route: string
-) => {
-  const line = `[${tag}] ${message} ip=${ip} phone=${phone} route=${route}`;
-  app.log[level](line);
-};
 
 /**
  * Normalize phone to E.164-like local canonical format: 7XXXXXXXXXX.
@@ -108,18 +91,18 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
     const ip = request.ip;
     const raw = request.body?.phone?.trim();
     if (!raw) {
-      logAuthLine(app, "warn", "AUTH_REQ_INVALID", MSG_PHONE_INVALID, ip, "-", route);
+      logFail2banLine(app, "warn", "AUTH_REQ_INVALID", MSG_PHONE_INVALID, ip, "-", route);
       return reply.code(400).send({ success: false, message: MSG_PHONE_INVALID });
     }
 
     const phone = normalizePhone(raw);
     if (!phone) {
-      logAuthLine(app, "warn", "AUTH_REQ_INVALID", MSG_PHONE_INVALID, ip, raw, route);
+      logFail2banLine(app, "warn", "AUTH_REQ_INVALID", MSG_PHONE_INVALID, ip, raw, route);
       return reply.code(400).send({ success: false, message: MSG_PHONE_INVALID });
     }
 
     if ((await isOtpRequestBlockedByIp(ip)) || (await isOtpVerifyBlockedByIp(ip))) {
-      logAuthLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
+      logFail2banLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
       return reply.code(429).send({
         success: false,
         message: MSG_IP_BLOCKED,
@@ -133,7 +116,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
     );
     if (uniquePhonesByIp >= PHONE_REQUEST_LIMIT_ATTEMPTS) {
       await applyBlockByIp(ip, PHONE_REQUEST_IP_RATE_LIMIT_TTL);
-      logAuthLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
+      logFail2banLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
       return reply.code(429).send({
         success: false,
         message: MSG_IP_BLOCKED,
@@ -146,7 +129,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
       reqByIp + (await getOtpVerifyCounterByIp(ip)) >= AUTH_REQUESTS_LIMIT_ATTEMPTS
     ) {
       await applyBlockByIp(ip, PHONE_REQUEST_IP_RATE_LIMIT_TTL);
-      logAuthLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
+      logFail2banLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
       return reply.code(429).send({
         success: false,
         message: MSG_IP_BLOCKED,
@@ -156,7 +139,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
     const reqByPhone = await incrementOtpRequestCounterByPhone(phone, PHONE_REQUEST_RATE_LIMIT_TTL);
     if (reqByPhone >= PHONE_REQUEST_IP_LIMIT_ATTEMPTS) {
       await applyBlockByIp(ip, PHONE_REQUEST_IP_RATE_LIMIT_TTL);
-      logAuthLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
+      logFail2banLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
       return reply.code(429).send({
         success: false,
         message: MSG_IP_BLOCKED,
@@ -167,7 +150,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
       if (reqByPhone === PHONE_REQUEST_LIMIT_ATTEMPTS) {
         await resetOtpRequestCounterByPhoneTTL(phone, PHONE_REQUEST_RATE_LIMIT_TTL);
       }
-      logAuthLine(app, "warn", "AUTH_REQ_RATE_LIMITED", MSG_RATE_LIMITED, ip, phone, route);
+      logFail2banLine(app, "warn", "AUTH_REQ_RATE_LIMITED", MSG_RATE_LIMITED, ip, phone, route);
       return reply.header("Retry-After", String(PHONE_REQUEST_RATE_LIMIT_TTL)).code(429).send({
         success: false,
         message: MSG_RATE_LIMITED,
@@ -183,7 +166,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
       if (existingCode) {
         await setOtp(phone, existingCode, OTP_TTL);
       }
-      logAuthLine(app, "info", "AUTH_REQ_QUEUED", MSG_REQUEST_QUEUED, ip, phone, route);
+      logFail2banLine(app, "info", "AUTH_REQ_QUEUED", MSG_REQUEST_QUEUED, ip, phone, route);
       return reply.code(200).send({
         success: true,
         message: MSG_REQUEST_QUEUED,
@@ -197,7 +180,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
       await setOtp(phone, existingCode, OTP_TTL);
       const enqueued = await enqueueOtpCall({ phone, ip });
       if (!enqueued) {
-        logAuthLine(app, "info", "AUTH_REQ_QUEUED", MSG_REQUEST_QUEUED, ip, phone, route);
+        logFail2banLine(app, "info", "AUTH_REQ_QUEUED", MSG_REQUEST_QUEUED, ip, phone, route);
         return reply.code(200).send({
           success: true,
           message: MSG_REQUEST_QUEUED,
@@ -205,7 +188,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
           pinExpiresAt: nowUnixSec() + OTP_TTL,
         });
       }
-      logAuthLine(app, "info", "AUTH_REQ_ACCEPTED", MSG_REQUEST_ACCEPTED, ip, phone, route);
+      logFail2banLine(app, "info", "AUTH_REQ_ACCEPTED", MSG_REQUEST_ACCEPTED, ip, phone, route);
       return reply.code(200).send({
         success: true,
         message: MSG_REQUEST_ACCEPTED,
@@ -218,7 +201,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
     await setOtp(phone, code, OTP_TTL);
     const queued = await enqueueOtpCall({ phone, ip });
     if (!queued) {
-      logAuthLine(app, "info", "AUTH_REQ_QUEUED", MSG_REQUEST_QUEUED, ip, phone, route);
+      logFail2banLine(app, "info", "AUTH_REQ_QUEUED", MSG_REQUEST_QUEUED, ip, phone, route);
       return reply.code(200).send({
         success: true,
         message: MSG_REQUEST_QUEUED,
@@ -227,7 +210,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
       });
     }
 
-    logAuthLine(app, "info", "AUTH_REQ_ACCEPTED", MSG_REQUEST_ACCEPTED, ip, phone, route);
+    logFail2banLine(app, "info", "AUTH_REQ_ACCEPTED", MSG_REQUEST_ACCEPTED, ip, phone, route);
     return reply.code(200).send({
       success: true,
       message: MSG_REQUEST_ACCEPTED,
@@ -246,18 +229,18 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
     const raw = request.body?.phone?.trim();
     const codeIn = request.body?.code?.trim();
     if (!raw) {
-      logAuthLine(app, "warn", "AUTH_VERIFY_INVALID", MSG_PHONE_INVALID, ip, "-", route);
+      logFail2banLine(app, "warn", "AUTH_VERIFY_INVALID", MSG_PHONE_INVALID, ip, "-", route);
       return reply.code(400).send({ success: false, message: MSG_PHONE_INVALID });
     }
 
     const phone = normalizePhone(raw);
     if (!phone) {
-      logAuthLine(app, "warn", "AUTH_VERIFY_INVALID", MSG_PHONE_INVALID, ip, raw, route);
+      logFail2banLine(app, "warn", "AUTH_VERIFY_INVALID", MSG_PHONE_INVALID, ip, raw, route);
       return reply.code(400).send({ success: false, message: MSG_PHONE_INVALID });
     }
 
     if ((await isOtpRequestBlockedByIp(ip)) || (await isOtpVerifyBlockedByIp(ip))) {
-      logAuthLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
+      logFail2banLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
       return reply.code(429).send({
         success: false,
         message: MSG_IP_BLOCKED,
@@ -270,7 +253,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
       verifyByIp + (await getOtpRequestCounterByIp(ip)) >= AUTH_REQUESTS_LIMIT_ATTEMPTS
     ) {
       await applyBlockByIp(ip, PIN_VERIFY_IP_RATE_LIMIT_TTL);
-      logAuthLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
+      logFail2banLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
       return reply.code(429).send({
         success: false,
         message: MSG_IP_BLOCKED,
@@ -281,7 +264,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
     const applyVerifyLimits = async () => {
       if (verifyByPhone >= PIN_VERIFY_IP_LIMIT_ATTEMPTS) {
         await applyBlockByIp(ip, PIN_VERIFY_IP_RATE_LIMIT_TTL);
-        logAuthLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
+        logFail2banLine(app, "warn", "AUTH_BLOCK", MSG_IP_BLOCKED, ip, phone, route);
         return reply.code(429).send({
           success: false,
           message: MSG_IP_BLOCKED,
@@ -291,7 +274,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
         if (verifyByPhone === PIN_VERIFY_LIMIT_ATTEMPTS) {
           await resetOtpVerifyCounterByPhoneTTL(phone, PIN_VERIFY_RATE_LIMIT_TTL);
         }
-        logAuthLine(app, "warn", "AUTH_VERIFY_RATE_LIMITED", MSG_RATE_LIMITED, ip, phone, route);
+        logFail2banLine(app, "warn", "AUTH_VERIFY_RATE_LIMITED", MSG_RATE_LIMITED, ip, phone, route);
         return reply.header("Retry-After", String(PIN_VERIFY_RATE_LIMIT_TTL)).code(429).send({
           success: false,
           message: MSG_RATE_LIMITED,
@@ -304,7 +287,7 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
     if (!codeIn || !/^\d{5}$/.test(codeIn)) {
       const limited = await applyVerifyLimits();
       if (limited) return limited;
-      logAuthLine(app, "warn", "AUTH_VERIFY_INVALID", MSG_PIN_INVALID, ip, phone, route);
+      logFail2banLine(app, "warn", "AUTH_VERIFY_INVALID", MSG_PIN_INVALID, ip, phone, route);
       return reply.code(400).send({ success: false, message: MSG_PIN_INVALID });
     }
 
@@ -312,21 +295,21 @@ export const registerAuthRoutes = async (app: FastifyInstance) => {
     if (!expected) {
       const limited = await applyVerifyLimits();
       if (limited) return limited;
-      logAuthLine(app, "warn", "AUTH_VERIFY_EXPIRED", MSG_PIN_EXPIRED, ip, phone, route);
+      logFail2banLine(app, "warn", "AUTH_VERIFY_EXPIRED", MSG_PIN_EXPIRED, ip, phone, route);
       return reply.code(410).send({ success: false, message: MSG_PIN_EXPIRED });
     }
 
     if (expected !== codeIn) {
       const limited = await applyVerifyLimits();
       if (limited) return limited;
-      logAuthLine(app, "warn", "AUTH_VERIFY_WRONG_CODE", MSG_PIN_INVALID, ip, phone, route);
+      logFail2banLine(app, "warn", "AUTH_VERIFY_WRONG_CODE", MSG_PIN_INVALID, ip, phone, route);
       return reply.code(400).send({ success: false, message: MSG_PIN_INVALID });
     }
 
     const user = await getOrCreateUser(phone);
     await deleteOtp(phone);
     await Promise.all([resetOtpRateLimitsByPhone(phone), resetOtpRateLimitsByIp(ip)]);
-    logAuthLine(app, "info", "AUTH_VERIFY_SUCCESS", MSG_PIN_CONFIRMED, ip, phone, route);
+    logFail2banLine(app, "info", "AUTH_VERIFY_SUCCESS", MSG_PIN_CONFIRMED, ip, phone, route);
     return reply.code(200).send({
       success: true,
       message: MSG_PIN_CONFIRMED,
