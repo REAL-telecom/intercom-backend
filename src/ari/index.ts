@@ -9,17 +9,17 @@
  */
 
 export { AriTransportError } from "./request";
-export { connectAriEvents } from "./websocket";
+export { websocket } from "./websocket";
 export {
-  answerChannel,
-  continueInDialplan,
+  createChannelInStasis,
+  createChannelInDialplan,
   getChannel,
-  getChannelVariable,
-  hangupChannel,
-  holdChannel,
   listChannels,
-  originateCall,
-  originateToDialplan,
+  getChannelVariable,
+  answerChannel,
+  holdChannel,
+  continueInDialplan,
+  hangupChannel,
 } from "./channels";
 export { addChannelToBridge, createBridge, deleteBridge, getBridge } from "./bridges";
 export { createEndpoint, deleteEndpoint } from "./endpoints";

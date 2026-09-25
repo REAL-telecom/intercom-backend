@@ -1,8 +1,8 @@
 export { redisClient } from "./client";
 
 export {
-  setCallData,
-  getCallData,
+  setCall,
+  getCall,
   getCallId,
   setDialStatus,
   getDialStatus,
@@ -10,19 +10,19 @@ export {
   listDialedChannels,
   addDialedContact,
   removeDialedContact,
-  setEndpointSession,
-  getEndpointSession,
-  setChannelSession,
-  getChannelSession,
-  setPendingOriginate,
-  getPendingOriginate,
-  deletePendingOriginate,
-  setCallingPanel,
-  getCallingPanel,
-  deleteCallingPanel,
-  clearCallData,
-  acquireBridgeCleanup,
-  acquireCallOverPush,
+  setEndpoint,
+  getEndpoint,
+  setChannel,
+  getChannel,
+  setOriginate,
+  getOriginate,
+  deleteOriginate,
+  setPanel,
+  getPanel,
+  deletePanel,
+  clearCall,
+  markBridgeForCleanup,
+  markCallOverPushSet,
 } from "./calls";
 
 export type { DialStatus } from "./calls";

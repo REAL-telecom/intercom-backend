@@ -1,21 +1,12 @@
 /**
  * Shape of data stored under call:${callId}.
- * Incoming (domophone): channelId, endpointId, credentials, status, bridgeId, address.
- * Outgoing (app-to-app): endpointId, credentials only.
+ * Incoming (domophone): channelId, endpointId, bridgeId, address.
  */
 export type CallData = {
   channelId?: string;
   endpointId?: string;
   userId?: number;
   apartment?: string;
-  panelIp?: string;
-  credentials?: {
-    sipCredentials: {
-      username: string;
-      password: string;
-      domain: string;
-    };
-  };
   /** Incoming only: bridge id for cleanup. */
   bridgeId?: string;
   /** Incoming only: display address (e.g. panel address). */
@@ -32,18 +23,6 @@ export type CallData = {
 export type ChannelSession = {
   bridgeId?: string;
   callId?: string;
-};
-
-/** Payload for /calls/credentials response (temporary SIP credentials for outgoing calls). */
-export type CredentialsPayload = {
-  endpointId: string;
-  credentials: {
-    sipCredentials: {
-      username: string;
-      password: string;
-      domain: string;
-    };
-  };
 };
 
 export type PushPlatform = "android" | "ios_voip" | "ios_apns";

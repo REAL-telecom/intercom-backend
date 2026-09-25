@@ -1,5 +1,5 @@
 import { env } from "../config";
-import { acquireCallOverPush } from "../store/redis";
+import { markCallOverPushSet } from "../store/redis";
 import { listPushTokens, removePushTokens } from "../store/postgres";
 import { sendFcmCallEnded } from "./fcm";
 import { sendApnsCallEndedPush } from "./apns";
@@ -40,8 +40,7 @@ export const notifyCallOver = async (
   logger: FastifyBaseLogger
 ): Promise<void> => {
   try {
-    const shouldNotify = await acquireCallOverPush(callId, reason, env.callTokenTtlSec);
-    if (!shouldNotify) {
+    if (!(await markCallOverPushSet(callId, reason, env.callTokenTtlSec))) {
       logger.debug({ callId, reason }, "Call-over push already sent for this reason, skipping");
       return;
     }

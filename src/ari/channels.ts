@@ -6,8 +6,9 @@
  * dialplan (диалплан) — сценарий обработки вызова внутри Asterisk.
  * Stasis — приложение Asterisk ARI: точка передачи управления каналом
  *   внешнему приложению.
- * originate (оригинация) — операция ARI: Asterisk сам инициирует исходящий
- *   звонок на endpoint.
+ * originate (оригинация) — операция ARI: Asterisk сам создаёт исходящий
+ *   канал на endpoint. Эндпоинт `POST /channels` в документации ARI описан
+ *   как «Create a new channel (originate)».
  *
  * Ring — состояние канала: входящий звонок звонит, трубка не взята.
  * Up — состояние канала: разговор идёт, участники соединены.
@@ -27,6 +28,55 @@ import type { HangupReason } from "../types";
  *   failed      — сбросить не получилось по другой причине
  */
 type HangupStatus = "hungUp" | "alreadyGone" | "failed";
+
+/**
+ * Создаёт канал в Stasis: Asterisk сам звонит на endpoint, управление приходит в приложение.
+ *
+ * @param endpoint — контакт PJSIP вида `PJSIP/<endpoint_id>`
+ * @param appArgs — аргументы, которые приложение получит в StasisStart
+ * @returns объект с идентификатором созданного канала
+ * @throws Error, если ARI не вернул id канала
+ */
+export async function createChannelInStasis(endpoint: string, appArgs: string) {
+  const channel = await request<{ id?: string }>("/channels", "POST", {
+    endpoint,
+    app: env.ariAppName,
+    appArgs,
+  });
+  if (!channel?.id) {
+    throw new Error("ARI originate returned no channel id");
+  }
+  return { id: channel.id };
+}
+
+/**
+ * Создаёт канал сразу в диалплане, минуя Stasis.
+ *
+ * Переменные канала доступны в диалплане как ${VAR}. Используется для сценариев,
+ * где канал создаётся сразу в диалплане: рассылка OTP-кодов, обзвон.
+ *
+ * @param params.endpoint — контакт PJSIP вида `PJSIP/<endpoint_id>`
+ * @param params.context — контекст диалплана
+ * @param params.extension — экстеншен (номер)
+ * @param params.priority — приоритет
+ * @param params.variables — переменные канала, доступные в диалплане
+ * @returns ответ ARI на создание канала
+ */
+export async function createChannelInDialplan(params: {
+  endpoint: string;
+  context: string;
+  extension: string;
+  priority: number;
+  variables: Record<string, string>;
+}) {
+  return request("/channels", "POST", {
+    endpoint: params.endpoint,
+    context: params.context,
+    extension: params.extension,
+    priority: params.priority,
+    variables: params.variables,
+  });
+}
 
 /**
  * Возвращает информацию о канале, включая состояние.
@@ -88,6 +138,32 @@ export async function holdChannel(channelId: string) {
 }
 
 /**
+ * Выводит канал из Stasis и продолжает его в диалплане.
+ *
+ * Канал покидает мост автоматически. Используется, чтобы вернуть канал панели
+ * в диалплан: там он попадёт на нужную ветку (noanswer, busy, invalid) и корректно
+ * завершит вызов.
+ *
+ * @param channelId — идентификатор канала ARI
+ * @param context — контекст диалплана
+ * @param extension — экстеншен (номер)
+ * @param priority — приоритет
+ */
+export async function continueInDialplan(
+  channelId: string,
+  context: string,
+  extension: string,
+  priority: number
+): Promise<void> {
+  const params = new URLSearchParams({
+    context,
+    extension,
+    priority: String(priority),
+  });
+  await request(`/channels/${channelId}/continue?${params.toString()}`, "POST");
+}
+
+/**
  * Пытается повесить трубку каналу, если он ещё существует.
  *
  * Возвращает статус:
@@ -119,78 +195,4 @@ export async function hangupChannel(
     logger.warn({ err: error, channelId }, "ARI hangup failed");
     return "failed";
   }
-}
-
-/**
- * Выводит канал из Stasis и продолжает его в диалплане.
- *
- * Канал покидает мост автоматически. Используется, чтобы вернуть канал панели
- * в диалплан: там он попадёт на нужную ветку (noanswer, busy, invalid) и корректно
- * завершит вызов.
- *
- * @param channelId — идентификатор канала ARI
- * @param context — контекст диалплана
- * @param extension — экстеншен (номер)
- * @param priority — приоритет
- */
-export async function continueInDialplan(
-  channelId: string,
-  context: string,
-  extension: string,
-  priority: number
-): Promise<void> {
-  const params = new URLSearchParams({
-    context,
-    extension,
-    priority: String(priority),
-  });
-  await request(`/channels/${channelId}/continue?${params.toString()}`, "POST");
-}
-
-/**
- * Оригинирует исходящий звонок на endpoint.
- *
- * @param endpoint — контакт PJSIP вида `PJSIP/<endpoint_id>`
- * @param appArgs — аргументы, которые приложение получит в StasisStart
- * @returns объект с идентификатором созданного канала
- * @throws Error, если ARI не вернул id канала
- */
-export async function originateCall(endpoint: string, appArgs: string) {
-  const channel = await request<{ id?: string }>("/channels", "POST", {
-    endpoint,
-    app: env.ariAppName,
-    appArgs,
-  });
-  if (!channel?.id) {
-    throw new Error("ARI originate returned no channel id");
-  }
-  return { id: channel.id };
-}
-
-/**
- * Оригинирует в диалплан, минуя Stasis.
- *
- * Переменные канала доступны в диалплане как ${VAR}. Используется для сценариев,
- * где канал создаётся сразу в диалплане: рассылка OTP-кодов, обзвон.
- *
- * @param params.endpoint — контакт PJSIP вида `PJSIP/<endpoint_id>`
- * @param params.context — контекст диалплана
- * @param params.extension — экстеншен (номер)
- * @param params.priority — приоритет
- * @param params.variables — переменные канала, доступные в диалплане
- */
-export async function originateToDialplan(params: {
-  endpoint: string;
-  context: string;
-  extension: string;
-  priority: number;
-  variables: Record<string, string>;
-}) {
-  return request("/channels", "POST", {
-    endpoint: params.endpoint,
-    context: params.context,
-    extension: params.extension,
-    priority: params.priority,
-    variables: params.variables,
-  });
 }

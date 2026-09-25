@@ -462,15 +462,15 @@ export async function removePushTokens(userId: number | string, tokens: string[]
 // ─── Временные эндпоинты ────────────────────────────────────────────
 
 /**
- * Возвращает идентификаторы временных SIP-endpoint: все inc_* и out_*.
+ * Возвращает идентификаторы временных SIP-endpoint: все tmp_*.
  * Используется дворником, чтобы понять, какие учётки надо подобрать.
  * Постоянные эндпоинты — панель, МультиФон — в список не попадают.
  *
  * @returns список идентификаторов
  */
-export async function listTempEndpoints(): Promise<string[]> {
+export async function listTemporaryEndpoints(): Promise<string[]> {
   const result = await pool.query(
-    `SELECT id FROM ps_endpoints WHERE id LIKE 'inc_%' OR id LIKE 'out_%'`
+    `SELECT id FROM ps_endpoints WHERE id LIKE 'tmp_%'`
   );
   return result.rows.map((row: { id: string }) => row.id);
 }

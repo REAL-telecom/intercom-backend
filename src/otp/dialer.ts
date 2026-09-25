@@ -9,7 +9,7 @@
  */
 
 import { FastifyInstance } from "fastify";
-import { originateToDialplan } from "../ari";
+import { createChannelInDialplan } from "../ari";
 import { isClientBanned, logFail2banLine } from "../fail2ban";
 import { deleteOtp, getOtp } from "../store/redis/otp/codes";
 import {
@@ -90,7 +90,7 @@ async function handleOtpCall(app: FastifyInstance) {
   try {
     // Оригинация в диалплан, не в Stasis: для OTP-звонка ARI не нужен,
     // достаточно проиграть голосом код и повесить трубку.
-    const channel = (await originateToDialplan({
+    const channel = (await createChannelInDialplan({
       endpoint: `PJSIP/${phone}@${OTP_TRUNK}`,
       context: OTP_CONTEXT,
       extension: "s",

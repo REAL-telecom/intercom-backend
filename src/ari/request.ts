@@ -53,15 +53,16 @@ export class AriTransportError extends Error {
 const REQUEST_TIMEOUT_MS = 10_000;
 
 /**
- * Возвращает признак: где-то в цепочке error.cause сидит таймаут или AbortError.
+ * Возвращает признак: ошибка вызвана таймаутом или прерыванием.
  *
- * Нужен потому, что Node fetch заворачивает AbortSignal.timeout в TypeError,
- * и настоящая причина лежит на глубине до 5 уровней в .cause.
+ * Проверяет саму ошибку и цепочку error.cause до 5 уровней: Node fetch
+ * заворачивает AbortSignal.timeout в TypeError, и настоящая причина
+ * лежит внутри.
  *
  * @param error — любая ошибка, пойманная в запросе
- * @returns true, если причина по цепочке cause — таймаут или прерывание
+ * @returns true, если ошибка или её причина по цепочке cause — таймаут или прерывание
  */
-function hasTimeoutCause(error: unknown): boolean {
+function isTimeoutError(error: unknown): boolean {
   let current: unknown = error;
   for (let depth = 0; depth < 5 && current && typeof current === "object"; depth++) {
     if ("name" in current && (current.name === "TimeoutError" || current.name === "AbortError")) {
@@ -82,7 +83,7 @@ function hasTimeoutCause(error: unknown): boolean {
  * @returns AriTransportError с человекочитаемым сообщением и флагом isTimeout
  */
 function toTransportError(error: unknown): AriTransportError {
-  const isTimeout = hasTimeoutCause(error);
+  const isTimeout = isTimeoutError(error);
   const detail = error instanceof Error ? error.message : "ARI request transport failed";
   return new AriTransportError(isTimeout ? `ARI request timed out: ${detail}` : `ARI request failed: ${detail}`, {
     cause: error,

@@ -1,21 +1,40 @@
+/**
+ * Глоссарий.
+ *
+ * Redis — внешнее хранилище состояний звонков, лимитов и очереди OTP.
+ *   Клиент ioredis, по одному соединению на роль.
+ * BLPOP — блокирующая команда Redis: ждёт появления элемента в списке
+ *   и забирает его. Соединение занято до возврата команды.
+ * Роль — назначение соединения. В этом файле две роли: общий клиент
+ *   для обычных команд и отдельный клиент для BLPOP.
+ */
+
 import Redis from "ioredis";
 import { env } from "../../config";
 
-const createRedis = () =>
-  new Redis({
+function createRedis() {
+  return new Redis({
     host: env.redisHost,
     port: env.redisPort,
     password: env.redisPassword,
   });
+}
 
 /**
- * Shared Redis client for HTTP handlers, workers (non-blocking commands), and stores.
+ * Хранит общий клиент Redis для HTTP-обработчиков, воркеров и хранилищ.
+ *
+ * Блокирующие команды через него не идут.
+ * Этот файл — исключение из правила «никаких объектов-синглтонов».
+ * Два клиента создаются один раз на процесс намеренно.
+ * Каждый владеет своим соединением.
  */
 export const redisClient = createRedis();
 
 /**
- * Dedicated client for BLPOP in the OTP queue consumer. Blocking commands occupy their
- * connection until they return; using the same client as /auth would make every
- * request wait behind each BLPOP (multi-second tail latency in practice).
+ * Хранит отдельный клиент Redis для BLPOP в воркере очереди OTP.
+ *
+ * Блокирующая команда занимает соединение до возврата, поэтому общий
+ * клиент с /auth не подходит. Иначе на запросах аутентификации была бы
+ * заметная задержка за каждым BLPOP.
  */
 export const redisBlockingClient = createRedis();

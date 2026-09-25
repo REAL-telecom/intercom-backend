@@ -8,11 +8,11 @@ import { env } from "../config";
 import { AriRequestError, formatRequestError, request } from "./request";
 
 /**
- * Параметры временного SIP-endpoint, создаваемого на время одного звонка.
- * Используется и для входящих inc_*, и для исходящих out_* учёток.
+ * Параметры временного endpoint, создаваемого на время одного звонка.
+ * Используется для временных tmp_* учёток.
  * Удаляется после звонка.
  */
-type TempSIPEndpoint = {
+type Endpoint = {
   context: string;
   id: string;
   maxContacts?: number;
@@ -79,7 +79,7 @@ async function unsubscribeFromEndpoint(endpointId: string) {
  * @param params — параметры временной учётки
  * @throws Error с деталями, если один из PUT-ов или подписка не прошли
  */
-export async function createEndpoint(params: TempSIPEndpoint) {
+export async function createEndpoint(params: Endpoint) {
   const expiration = String(env.tempAorExpirationSec);
   const objects: {
     fields: { attribute: string; value: string }[];
@@ -141,7 +141,7 @@ export async function createEndpoint(params: TempSIPEndpoint) {
 export async function deleteEndpoint(endpointId: string) {
   await unsubscribeFromEndpoint(endpointId);
   // AOR идёт первым: Asterisk снимает зарегистрированные контакты при удалении AOR.
-  // Endpoint идёт последним: пока его запись существует, задача очистки находит объект и повторяет попытку.
+  // Объект endpoint идёт последним: пока его запись существует, задача очистки находит объект и повторяет попытку.
   const objectTypes = ["aor", "auth", "endpoint"] as const;
   for (const objectType of objectTypes) {
     const path = `/asterisk/config/dynamic/res_pjsip/${objectType}/${encodeURIComponent(endpointId)}`;

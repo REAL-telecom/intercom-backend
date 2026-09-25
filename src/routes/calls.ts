@@ -1,87 +1,53 @@
 import { FastifyInstance } from "fastify";
-import crypto from "crypto";
 import { env } from "../config";
 import {
-  setCallData,
-  setEndpointSession,
-  getCallData,
+  getCall,
   setDialStatus,
   listDialedChannels,
-  deleteCallingPanel,
-  deletePendingOriginate,
+  deletePanel,
+  deleteOriginate,
 } from "../store/redis";
-import { hangupChannel, continueInDialplan, createEndpoint } from "../ari";
-import { cleanupBridge } from "../calls/cleanup";
+import { hangupChannel, continueInDialplan } from "../ari";
+import { cleanupBridge } from "../calls/bridges/cleanup";
 import { notifyCallOver } from "../push/notifyCallOver";
 
-import type { CallData, CredentialsPayload } from "../types";
+import type { CallData } from "../types";
 
 /**
- * Register call routes:
- * - issue temporary SIP credentials for outgoing client calls (`/calls/credentials`)
- * - terminate active incoming call flow and cleanup bridge/channels (`/calls/end`)
+ * Регистрирует маршруты звонка: завершение активного входящего
+ * и уборку моста и каналов (`POST /calls/end`).
  */
-export const registerCallRoutes = async (app: FastifyInstance) => {
-  app.post("/calls/credentials", async () => {
-    const callId = crypto.randomUUID();
-    const endpointId = `out_${callId}`;
-    const sipUsername = endpointId;
-    const sipPassword = crypto.randomBytes(8).toString("hex");
-
-    await createEndpoint({
-      context: "intercom",
-      id: endpointId,
-      password: sipPassword,
-      username: sipUsername,
-    });
-
-    const payload: CredentialsPayload = {
-      endpointId,
-      credentials: {
-        sipCredentials: {
-          username: sipUsername,
-          password: sipPassword,
-          domain: env.serverDomain,
-        },
-      },
-    };
-
-    await setCallData(callId, payload, env.callTokenTtlSec);
-    await setEndpointSession(endpointId, { type: "outgoing" }, env.callTokenTtlSec);
-
-    return payload.credentials.sipCredentials;
-  });
-
+export async function registerCallRoutes(app: FastifyInstance) {
   /**
-   * End an incoming call (reject / decline from device).
-   * Called by the app when user taps reject or when call is declined.
-   * Hangs up the domophone channel and deletes the bridge.
+   * Завершает входящий звонок: приложение зовёт, когда пользователь
+   * нажал «отклонить» или звонок отклонён. Гасит канал панели
+   * и удаляет мост.
    */
   app.post<{ Body: { callId: string } }>("/calls/end", async (request, reply) => {
     const callId = request.body?.callId?.trim();
     if (!callId) {
       return reply.code(400).send({ error: "callId required" });
     }
-    const callData = await getCallData<CallData>(callId);
-    if (!callData?.channelId) {
+    const call = await getCall<CallData>(callId);
+    if (!call?.channelId) {
       return reply.code(404).send({ error: "Call not found or already ended" });
     }
-    const channelId = callData.channelId;
+    const channelId = call.channelId;
     const claimed = await setDialStatus(callId, "rejected", env.callTokenTtlSec);
     request.log.info({ callId, claimed }, "calls/end: claimed rejected outcome");
     if (claimed) {
-      await notifyCallOver(callId, callData, "declined_elsewhere", request.log);
+      await notifyCallOver(callId, call, "declined_elsewhere", request.log);
     }
-    if (callData.endpointId) {
+    if (call.endpointId) {
       try {
-        await deletePendingOriginate(callData.endpointId);
+        await deleteOriginate(call.endpointId);
         request.log.info(
-          { callId, endpointId: callData.endpointId },
+          { callId, endpointId: call.endpointId },
           "calls/end: cleared pending originate"
         );
       } catch (err) {
         request.log.warn(
-          { err, callId, endpointId: callData.endpointId },
+          { err, callId, endpointId: call.endpointId },
           "calls/end: failed to clear pending originate"
         );
       }
@@ -89,28 +55,28 @@ export const registerCallRoutes = async (app: FastifyInstance) => {
     try {
       await continueInDialplan(channelId, "from-domophone", "busy", 1);
     } catch (err) {
-      request.log.warn({ err, channelId, callId }, "continueInDialplan failed (channel may already be down)");
+      request.log.warn({ err, channelId, callId }, "continueInDialplan failed (intercom channel may already be down)");
     }
-    const originateChannelIds = await listDialedChannels(callId);
-    for (const originateChannelId of originateChannelIds) {
-      if ((await hangupChannel(originateChannelId, request.log)) === "hungUp") {
+    const dialedChannelIds = await listDialedChannels(callId);
+    for (const dialedChannelId of dialedChannelIds) {
+      if ((await hangupChannel(dialedChannelId, request.log)) === "hungUp") {
         request.log.info(
-          { callId, originateChannelId },
-          "calls/end: hung up originate channel"
+          { callId, dialedChannelId },
+          "calls/end: hung up dialed channel"
         );
       }
     }
-    if (callData.bridgeId) {
+    if (call.bridgeId) {
       await cleanupBridge(
-        callData.bridgeId,
+        call.bridgeId,
         channelId,
         { callId, channelId, source: "callsEnd" },
         request.log
       );
     }
-    if (callData.domophoneEndpointId) {
-      await deleteCallingPanel(callData.domophoneEndpointId);
+    if (call.domophoneEndpointId) {
+      await deletePanel(call.domophoneEndpointId);
     }
     return reply.code(204).send();
   });
-};
+}

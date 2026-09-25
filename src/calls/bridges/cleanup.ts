@@ -1,7 +1,7 @@
-import { env } from "../config";
-import { acquireBridgeCleanup } from "../store/redis";
-import { hangupChannel, deleteBridge, getBridge } from "../ari";
-import { AriRequestError } from "../ari/request";
+import { env } from "../../config";
+import { markBridgeForCleanup } from "../../store/redis";
+import { hangupChannel, deleteBridge, getBridge } from "../../ari";
+import { AriRequestError } from "../../ari/request";
 
 import type { FastifyBaseLogger } from "fastify";
 
@@ -20,7 +20,7 @@ export type CleanupBridgeContext = {
 
 /**
  * Убирает mixing-мост один раз: гасит оставшиеся каналы и удаляет мост.
- * Первый вызвавший побеждает через acquireBridgeCleanup, остальные выходят сразу.
+ * Первый вызвавший побеждает через markBridgeForCleanup, остальные выходят сразу.
  *
  * @param bridgeId — идентификатор моста
  * @param skipChannelId — канал панели, который уже отправлен в диалплан
@@ -34,8 +34,7 @@ export async function cleanupBridge(
   context: CleanupBridgeContext,
   logger: FastifyBaseLogger
 ): Promise<void> {
-  const shouldCleanup = await acquireBridgeCleanup(bridgeId, env.callTokenTtlSec);
-  if (!shouldCleanup) {
+  if (!(await markBridgeForCleanup(bridgeId, env.callTokenTtlSec))) {
     return;
   }
   try {
