@@ -1,16 +1,21 @@
 /**
  * Глоссарий.
  *
- * endpoint — объект ARI: описывает конечное SIP-устройство, вызываемое по имени.
+ * Endpoint — объект ARI. Описывает конечное SIP-устройство, которое вызывают по имени.
  */
 
 import { env } from "../config";
 import { AriRequestError, formatRequestError, request } from "./request";
 
 /**
- * Параметры временного endpoint, создаваемого на время одного звонка.
- * Используется для временных tmp_* учёток.
- * Удаляется после звонка.
+ * Endpoint — представляет параметры учётки телефона на время одного звонка.
+ * После звонка учётка телефона удаляется.
+ *
+ * @property context — контекст диалплана
+ * @property id — идентификатор учётки телефона
+ * @property maxContacts — предел одновременных контактов
+ * @property password — пароль учётки телефона
+ * @property username — имя учётки телефона
  */
 type Endpoint = {
   context: string;
@@ -21,10 +26,10 @@ type Endpoint = {
 };
 
 /**
- * Возвращает путь для подписки на события указанного endpoint.
+ * getEndpointSubscriptionPath — возвращает путь подписки на события endpoint.
  *
- * @param endpointId — id временного endpoint
- * @returns путь с query-параметром `eventSource`
+ * @param endpointId идентификатор учётки телефона
+ * @returns путь подписки
  */
 function getEndpointSubscriptionPath(endpointId: string) {
   const params = new URLSearchParams({
@@ -34,13 +39,12 @@ function getEndpointSubscriptionPath(endpointId: string) {
 }
 
 /**
- * Подписывает приложение на события endpoint.
+ * subscribeToEndpoint — подписывает приложение на события endpoint.
+ * Поток событий открыт без `subscribeAll`. Без явной подписки сообщения о контакте не доходят.
+ * Включать `subscribeAll` на живом приложении нельзя.
  *
- * Сокет открыт без subscribeAll. Без явной подписки сообщения о контакте
- * до нас не дойдут. subscribeAll на живом приложении включать нельзя.
- *
- * @param endpointId — id временного endpoint
- * @throws Error, если подписка не создалась
+ * @param endpointId идентификатор учётки телефона
+ * @throws `Error`, если подписка не создалась
  */
 async function subscribeToEndpoint(endpointId: string) {
   try {
@@ -51,12 +55,11 @@ async function subscribeToEndpoint(endpointId: string) {
 }
 
 /**
- * Отписывается от событий endpoint.
+ * unsubscribeFromEndpoint — снимает подписку на события endpoint.
+ * Отсутствие подписки ошибкой не считается.
  *
- * Отсутствие подписки игнорируется.
- *
- * @param endpointId — id временного endpoint
- * @throws Error, если снять подписку не удалось по причине кроме 404
+ * @param endpointId идентификатор учётки телефона
+ * @throws `Error`, если снять подписку не удалось, а подписка при этом существовала
  */
 async function unsubscribeFromEndpoint(endpointId: string) {
   try {
@@ -71,13 +74,13 @@ async function unsubscribeFromEndpoint(endpointId: string) {
 }
 
 /**
- * Создаёт временный PJSIP endpoint через ARI.
- *
- * Повторный PUT с тем же id обновляет существующие объекты.
+ * createEndpoint — создаёт учётку телефона в PJSIP.
+ * Повторная запись с тем же идентификатором обновляет существующие объекты.
+ * Порядок объектов совпадает с `deleteEndpoint`.
  * После записи подписывает приложение на события этого endpoint.
  *
- * @param params — параметры временной учётки
- * @throws Error с деталями, если один из PUT-ов или подписка не прошли
+ * @param params параметры учётки телефона
+ * @throws `Error`, если запись объекта или подписка не прошла
  */
 export async function createEndpoint(params: Endpoint) {
   const expiration = String(env.tempAorExpirationSec);
@@ -132,11 +135,11 @@ export async function createEndpoint(params: Endpoint) {
 }
 
 /**
- * Удаляет PJSIP endpoint: снимает подписку и удаляет aor, auth, endpoint.
- * Отсутствие подписки и endpoint игнорируется.
+ * deleteEndpoint — удаляет учётку телефона в PJSIP.
+ * Сначала снимает подписку. Отсутствие подписки или объекта ошибкой не считается.
  *
- * @param endpointId — id временного endpoint
- * @throws Error с деталями, если удаление не прошло по причине кроме 404
+ * @param endpointId идентификатор учётки телефона
+ * @throws `Error`, если удаление не удалось, а объект при этом существовал
  */
 export async function deleteEndpoint(endpointId: string) {
   await unsubscribeFromEndpoint(endpointId);

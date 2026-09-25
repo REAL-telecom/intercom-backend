@@ -1,13 +1,11 @@
 /**
  * Глоссарий.
  *
- * ARI (Asterisk REST Interface) — REST-интерфейс Asterisk: через него
- *   выполняются команды над каналами, мостами и эндпоинтами.
- * WebSocket-поток событий — канал, по которому Asterisk присылает события
- *   ARI: StasisStart, StasisEnd, ChannelDestroyed, ContactStatusChange
- *   и остальные. Подключается один раз, живёт весь процесс.
- * Backoff — рост задержки между попытками переподключения. Здесь
- *   экспоненциальный: каждая следующая пауза вдвое длиннее предыдущей.
+ * ARI — интерфейс Asterisk, через который выполняются команды над каналами, мостами и эндпоинтами.
+ * Поток событий — соединение WebSocket, по которому Asterisk присылает события ARI, например `StasisStart`, `StasisEnd`, `ChannelDestroyed`, `ContactStatusChange` и остальные.
+ * Соединение одно на процесс и живёт, пока живёт процесс.
+ * Backoff — рост паузы между попытками переподключения.
+ * Здесь рост экспоненциальный: каждая следующая пауза вдвое длиннее предыдущей, пока не упрётся в верхний предел.
  */
 
 import WebSocket, { RawData } from "ws";
@@ -15,30 +13,55 @@ import WebSocket, { RawData } from "ws";
 import { getAuthHeader, getWsUrl } from "./utils";
 
 import type { FastifyBaseLogger } from "fastify";
-import type { AriEvent, AriEventHandler } from "../types";
 
-// Первая пауза между попытками переподключения, миллисекунды.
+/**
+ * Event — представляет событие из потока ARI.
+ *
+ * @property type — имя события
+ */
+export type Event = {
+  type: string;
+  [key: string]: unknown;
+};
+
+/**
+ * EventHandler — представляет обработчик события из потока ARI.
+ */
+export type EventHandler = (event: Event) => void | Promise<void>;
+
+/**
+ * ARI_RECONNECT_MIN_DELAY_MS — задаёт первую паузу между попытками переподключения.
+ */
 const ARI_RECONNECT_MIN_DELAY_MS = 1000;
 
-// Предел паузы между попытками переподключения, миллисекунды.
+/**
+ * ARI_RECONNECT_MAX_DELAY_MS — задаёт предел паузы между попытками переподключения.
+ */
 const ARI_RECONNECT_MAX_DELAY_MS = 30_000;
 
-// Предел показателя степени в backoff: дальше двойка не растёт, пауза упирается в верхний предел.
+/**
+ * ARI_RECONNECT_MAX_EXPONENT — задаёт предел показателя степени при росте паузы.
+ * Дальше пауза не растёт и упирается в `ARI_RECONNECT_MAX_DELAY_MS`.
+ */
 const ARI_RECONNECT_MAX_EXPONENT = 5;
 
 /**
- * Подключает приложение к потоку событий ARI WebSocket.
+ * websocket — подключает приложение к потоку событий ARI.
+ * При закрытии сокета подключается снова. Пауза растёт до `ARI_RECONNECT_MAX_DELAY_MS` и сбрасывается при успешном открытии.
+ * Наружу возвращается только сокет первого подключения.
  *
- * Переподключается при закрытии сокета с экспоненциальной задержкой до 30 секунд.
- * Счётчик попыток сбрасывается при успешном открытии.
+ * Как работает:
+ * 1. Открывает сокет и при успехе обнуляет счётчик попыток
+ * 2. Разбирает входящее сообщение как JSON и передаёт его в `onEvent`
+ * 3. Ошибку обработчика ловит отдельно, чтобы она не рвала сокет
+ * 4. При ошибке сокета пишет в лог, новое подключение запускает закрытие
+ * 5. При закрытии ждёт паузу и вызывает подключение снова
  *
- * @param onEvent — обработчик события ARI, может вернуть Promise
- * @param logger — логгер Fastify
- * @returns открытый WebSocket при первом подключении. Сокеты, созданные
- *   при переподключении, наружу не возвращаются: connect вызывается
- *   из close повторно.
+ * @param onEvent обработчик события, может вернуть промис
+ * @param logger логгер
+ * @returns сокет первого подключения
  */
-export function websocket(onEvent: AriEventHandler, logger: FastifyBaseLogger) {
+export function websocket(onEvent: EventHandler, logger: FastifyBaseLogger) {
   let attempts = 0;
 
   function connect() {
@@ -56,9 +79,9 @@ export function websocket(onEvent: AriEventHandler, logger: FastifyBaseLogger) {
 
     // Входящее сообщение: разбор JSON, вызов onEvent, перехват ошибок обработчика.
     ws.on("message", (data: RawData) => {
-      let event: AriEvent;
+      let event: Event;
       try {
-        event = JSON.parse(data.toString()) as AriEvent;
+        event = JSON.parse(data.toString()) as Event;
       } catch {
         logger.warn("ARI message ignored, invalid payload");
         return;

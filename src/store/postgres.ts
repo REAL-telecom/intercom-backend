@@ -1,18 +1,17 @@
 /**
  * Глоссарий.
  *
- * PostgreSQL — база данных сервиса. Хранит постоянные объекты (адреса, панели,
- *   пользователи, push-токены) и realtime-таблицы Asterisk.
- * Realtime-таблицы — таблицы PJSIP, из которых Asterisk читает конфигурацию
- *   во время работы. Префикс ps_ в имени таблицы означает «PJSIP».
+ * PostgreSQL — база данных сервиса. Хранит постоянные объекты и realtime-таблицы Asterisk.
+ * Постоянные объекты: адреса, панели, пользователи, push-токены.
+ * Realtime-таблицы — таблицы PJSIP, из которых Asterisk читает конфигурацию во время работы. Префикс `ps_` в имени таблицы означает PJSIP.
  * PJSIP-объект — три связанные записи Asterisk:
- *     - ps_aors — адрес записи: сколько контактов разрешено, срок жизни,
- *     - ps_auths — учётные данные SIP-аккаунта: логин и пароль,
- *     - ps_endpoints — сама оконечная точка: контекст, кодеки, медиа-настройки.
- * Pool — пул соединений с Postgres. Открывает сразу несколько соединений
- *   и раздаёт их запросам по мере надобности.
- * Шаблон эндпоинта — строка в ps_endpoints, от которой наследуются
- *   настоящие временные учётки. У нас два шаблона: tpl_domophone и tpl_client.
+ *  - `ps_aors` — адрес записи: сколько контактов разрешено и срок жизни
+ *  - `ps_auths` — учётные данные SIP-аккаунта, логин и пароль
+ *  - `ps_endpoints` — сама оконечная точка: контекст, кодеки, медиа-настройки
+ * Pool — пул соединений с Postgres. Открывает сразу несколько соединений и раздаёт их запросам по мере надобности.
+ * Шаблон эндпоинта — строка в `ps_endpoints`: `tpl_panel` и `tpl_client`.
+ * Учётка телефона при создании поле `templates` не получает, поэтому от этих строк не наследуется.
+ * `tpl_client` записывается при старте, других обращений к ней в коде нет.
  */
 
 import { Pool } from "pg";
@@ -20,8 +19,10 @@ import { env } from "../config";
 
 import type { PushPlatform, PushTokenRecord } from "../types";
 
-// Пул соединений с Postgres. Один на весь процесс: каждый запрос берёт
-// свободное соединение из пула и возвращает обратно.
+/**
+ * pool — представляет пул соединений с Postgres.
+ * Один на весь процесс: каждый запрос берёт свободное соединение и возвращает его обратно.
+ */
 const pool = new Pool({
   host: env.postgres.host,
   port: env.postgres.port,
@@ -33,18 +34,17 @@ const pool = new Pool({
 // ─── Схема базы ─────────────────────────────────────────────────────
 
 /**
- * Создаёт схему базы, если таблиц ещё нет.
- *
- * Создаёт таблицы:
- *  - addresses, panels — адреса домов и привязка панелей к адресам,
- *  - users — жильцы: телефон, квартира, срок оплаты,
- *  - calls — журнал звонков, пока не читается,
- *  - ps_aors, ps_auths, ps_endpoints — realtime-таблицы PJSIP,
- *  - ps_registrations — исходящие регистрации Asterisk, например МультиФон,
- *  - push_tokens — FCM и APNs токены устройств пользователя.
- *
+ * createDatabaseSchema — создаёт схему базы, если таблиц ещё нет.
  * Вызывается один раз при старте, чтобы сервер поднимался на пустой базе.
- * Повторный запуск безопасен: все CREATE через IF NOT EXISTS.
+ * Повторный запуск безопасен: все таблицы создаются через `IF NOT EXISTS`.
+ *
+ * Таблицы:
+ *  - `addresses` и `panels` — адреса домов и привязка панелей к адресам
+ *  - `users` — жильцы: телефон, квартира, срок оплаты
+ *  - `calls` — журнал звонков, пока не читается
+ *  - `ps_aors`, `ps_auths`, `ps_endpoints` — realtime-таблицы PJSIP
+ *  - `ps_registrations` — исходящие регистрации Asterisk, например МультиФон
+ *  - `push_tokens` — токены FCM и APNs устройств пользователя
  */
 export async function createDatabaseSchema() {
   await pool.query(`
@@ -169,9 +169,15 @@ export async function createDatabaseSchema() {
 // ─── Адреса ─────────────────────────────────────────────────────────
 
 /**
- * Адрес дома: улица, номер, необязательные части.
- * Привязан к панели и к пользователю. Квартира — отдельное поле пользователя,
- * не адреса.
+ * Address — представляет адрес дома.
+ * Привязан к панели и к пользователю. Квартира сюда не входит: она лежит у пользователя.
+ *
+ * @property id — идентификатор адреса
+ * @property street — улица
+ * @property house — номер дома
+ * @property building — корпус, если есть
+ * @property letter — литера, если есть
+ * @property structure — строение, если есть
  */
 export type Address = {
   id: number;
@@ -183,15 +189,19 @@ export type Address = {
 };
 
 /**
- * Создаёт запись адреса и возвращает её каноничные поля.
- * Опциональные части сохраняются как NULL, если не переданы.
+ * addAddress — создаёт запись адреса.
+ * Непереданная часть сохраняется как `NULL`.
  *
- * @param params.street — улица
- * @param params.house — номер дома
- * @param params.building — корпус, если есть
- * @param params.letter — литера, если есть
- * @param params.structure — строение, если есть
- * @returns сохранённая запись с присвоенным id
+ * Поля `params`:
+ *  - `street` — улица
+ *  - `house` — номер дома
+ *  - `building` — корпус, если есть
+ *  - `letter` — литера, если есть
+ *  - `structure` — строение, если есть
+ *
+ * @param params части адреса
+ * @returns сохранённая запись с присвоенным идентификатором
+ * @throws `Error`, если база не вернула строку
  */
 export async function addAddress(params: {
   street: string;
@@ -215,10 +225,10 @@ export async function addAddress(params: {
 }
 
 /**
- * Возвращает адрес по идентификатору.
+ * getAddress — возвращает адрес по идентификатору.
  *
- * @param addressId — идентификатор адреса
- * @returns адрес или null, если такого адреса нет
+ * @param addressId идентификатор адреса
+ * @returns адрес или `null`, если такого адреса нет
  */
 export async function getAddress(addressId: number): Promise<Address | null> {
   const result = await pool.query<Address>(
@@ -234,11 +244,12 @@ export async function getAddress(addressId: number): Promise<Address | null> {
 }
 
 /**
- * Собирает адрес в одну строку для пуша и отображения.
- * Квартира не входит: показывается отдельно, если нужна.
+ * formatAddress — возвращает адрес одной строкой для пуша и показа.
+ * Квартира не входит: её показывают отдельно, если она нужна.
+ * Например: «ул. Ленина, д. 5, корп. 2, лит. А, стр. 1».
  *
- * @param record — запись адреса
- * @returns строка вида «ул. Ленина, д. 5, корп. 2, лит. А»
+ * @param record запись адреса
+ * @returns строка адреса
  */
 export function formatAddress(record: Address): string {
   const parts = [`${record.street}, д. ${record.house}`];
@@ -257,7 +268,11 @@ export function formatAddress(record: Address): string {
 // ─── Панели ─────────────────────────────────────────────────────────
 
 /**
- * Панель домофона: IP-адрес и привязанный к ней адрес дома.
+ * Panel — представляет панель домофона.
+ *
+ * @property id — идентификатор панели
+ * @property ip — IP-адрес панели
+ * @property address_id — идентификатор адреса дома
  */
 export type Panel = {
   id: number;
@@ -266,11 +281,12 @@ export type Panel = {
 };
 
 /**
- * Создаёт привязку панели к адресу.
+ * addPanel — создаёт привязку панели к адресу.
+ * IP в базе хранится как `inet`, наружу возвращается строкой.
  *
- * @param params.ip — IP-адрес панели; в базе хранится как inet
- * @param params.addressId — идентификатор адреса
- * @returns созданная запись с IP как строкой
+ * @param params IP-адрес панели и идентификатор адреса
+ * @returns созданная запись
+ * @throws `Error`, если база не вернула строку
  */
 export async function addPanel(params: { ip: string; addressId: number }): Promise<Panel> {
   const { ip, addressId } = params;
@@ -288,10 +304,10 @@ export async function addPanel(params: { ip: string; addressId: number }): Promi
 }
 
 /**
- * Возвращает панель по IP-адресу.
+ * getPanel — возвращает панель по IP-адресу.
  *
- * @param ip — IP-адрес панели
- * @returns панель или null, если такой панели нет
+ * @param ip IP-адрес панели
+ * @returns панель или `null`, если такой панели нет
  */
 export async function getPanel(ip: string): Promise<Panel | null> {
   const result = await pool.query<Panel>(
@@ -309,10 +325,12 @@ export async function getPanel(ip: string): Promise<Panel | null> {
 // ─── Пользователи ───────────────────────────────────────────────────
 
 /**
- * Пользователь, найденный по адресу и квартире.
- * Отделён от User: содержит только то, что нужно для маршрутизации
- * входящего звонка — id и телефон. Push-токены у него не читаются,
- * они нужны только на этапе верификации телефона.
+ * ApartmentUser — представляет пользователя, найденного по адресу и квартире.
+ * Отделён от `User`: здесь только то, что нужно для маршрутизации входящего звонка, идентификатор и телефон.
+ * Push-токены отсюда не читаются. Они нужны на этапе верификации телефона.
+ *
+ * @property id — идентификатор пользователя
+ * @property phone — телефон
  */
 export type ApartmentUser = {
   id: number;
@@ -320,11 +338,11 @@ export type ApartmentUser = {
 };
 
 /**
- * Возвращает пользователя по адресу и квартире.
+ * getUser — возвращает пользователя по адресу и квартире.
  *
- * @param addressId — идентификатор адреса
- * @param apartment — номер квартиры
- * @returns пользователь или null, если по этой паре никого нет
+ * @param addressId идентификатор адреса
+ * @param apartment номер квартиры
+ * @returns пользователь или `null`, если по этой паре никого нет
  */
 export async function getUser(
   addressId: number,
@@ -343,9 +361,12 @@ export async function getUser(
 }
 
 /**
- * Пользователь после верификации телефона.
- * Отделён от ApartmentUser: к нему привязан последний push-токен,
- * нужный мобильному приложению для регистрации в FCM или APNs.
+ * User — представляет пользователя после верификации телефона.
+ * Отделён от `ApartmentUser`: здесь есть последний push-токен, он нужен приложению для регистрации в FCM или APNs.
+ *
+ * @property id — идентификатор пользователя
+ * @property phone — телефон
+ * @property pushToken — последний push-токен или пусто, если токена нет
  */
 export type User = {
   id: number;
@@ -354,11 +375,12 @@ export type User = {
 };
 
 /**
- * Возвращает пользователя по телефону или создаёт нового.
- * Если пользователь уже есть — возвращает его с последним push-токеном.
+ * getOrCreateUser — возвращает пользователя по телефону или создаёт нового.
+ * Если пользователь уже есть, к нему прикладывается последний push-токен.
  *
- * @param phone — телефон в канонической форме 7XXXXXXXXXX
- * @returns пользователь с id, телефоном и последним push-токеном
+ * @param phone телефон в канонической форме `7XXXXXXXXXX`
+ * @returns пользователь с идентификатором, телефоном и последним push-токеном
+ * @throws `Error`, если пользователя не удалось создать
  */
 export async function getOrCreateUser(phone: string): Promise<User> {
   const existing = await pool.query<{ id: number; phone: string }>(
@@ -403,12 +425,10 @@ export async function getOrCreateUser(phone: string): Promise<User> {
 // ─── Push-токены ────────────────────────────────────────────────────
 
 /**
- * Сохраняет push-токен пользователя. Повторная запись того же токена
- * обновляет платформу и время.
+ * savePushToken — сохраняет push-токен пользователя.
+ * Повторная запись того же токена обновляет платформу и время.
  *
- * @param params.userId — идентификатор пользователя
- * @param params.pushToken — токен FCM или APNs
- * @param params.platform — платформа: android, ios_voip или ios_apns
+ * @param params идентификатор пользователя, токен FCM или APNs и платформа
  */
 export async function savePushToken(params: {
   userId: number;
@@ -428,10 +448,10 @@ export async function savePushToken(params: {
 }
 
 /**
- * Возвращает записи push-токенов пользователя: сам токен и платформу.
+ * listPushTokens — возвращает push-токены пользователя: сам токен и платформу.
  *
- * @param userId — идентификатор пользователя
- * @returns список токенов; пустой массив, если токенов нет
+ * @param userId идентификатор пользователя
+ * @returns список токенов, пустой, если токенов нет
  */
 export async function listPushTokens(userId: number | string): Promise<PushTokenRecord[]> {
   const result = await pool.query<{ push_token: string; platform: PushPlatform }>(
@@ -445,11 +465,12 @@ export async function listPushTokens(userId: number | string): Promise<PushToken
 }
 
 /**
- * Убирает из набора токенов пользователя те, что FCM или APNs признали
- * недействительными: приложение удалено, токен просрочен.
+ * removePushTokens — убирает из набора пользователя токены, которые FCM или APNs признали недействительными.
+ * Так бывает, когда приложение удалено или токен просрочен.
+ * Пустой список завершает функцию без запроса в базу.
  *
- * @param userId — идентификатор пользователя
- * @param tokens — список токенов для удаления; пустой список — выход без запроса
+ * @param userId идентификатор пользователя
+ * @param tokens токены, которые нужно убрать
  */
 export async function removePushTokens(userId: number | string, tokens: string[]) {
   if (tokens.length === 0) return;
@@ -459,18 +480,18 @@ export async function removePushTokens(userId: number | string, tokens: string[]
   );
 }
 
-// ─── Временные эндпоинты ────────────────────────────────────────────
+// ─── Учётки телефона ────────────────────────────────────────────────
 
 /**
- * Возвращает идентификаторы временных SIP-endpoint: все tmp_*.
- * Используется дворником, чтобы понять, какие учётки надо подобрать.
- * Постоянные эндпоинты — панель, МультиФон — в список не попадают.
+ * listPhoneEndpoints — возвращает идентификаторы учёток телефона, у которых контекст `phone`.
+ * Постоянные эндпоинты, панель и МультиФон, в список не попадают.
+ * Используется дворником, чтобы понять, какие учётки телефона подобрать.
  *
  * @returns список идентификаторов
  */
-export async function listTemporaryEndpoints(): Promise<string[]> {
+export async function listPhoneEndpoints(): Promise<string[]> {
   const result = await pool.query(
-    `SELECT id FROM ps_endpoints WHERE id LIKE 'tmp_%'`
+    `SELECT id FROM ps_endpoints WHERE context = 'phone'`
   );
   return result.rows.map((row: { id: string }) => row.id);
 }
@@ -478,14 +499,12 @@ export async function listTemporaryEndpoints(): Promise<string[]> {
 // ─── Шаблоны эндпоинтов ─────────────────────────────────────────────
 
 /**
- * Заполняет таблицу ps_endpoints шаблонами по умолчанию: tpl_domophone
- * и tpl_client. Повторный вызов обновляет поле allow, остальные поля
- * не трогает.
- *
- * Шаблоны описывают кодеки, транспорт и медиа-настройки. Временные учётки
- * наследуются от них при создании.
- *
- * Вызывается один раз при старте после createDatabaseSchema.
+ * seedEndpointTemplates — заполняет `ps_endpoints` строками `tpl_panel` и `tpl_client`.
+ * Повторный вызов обновляет поле `allow`, остальные поля не трогает.
+ * Строки описывают кодеки, транспорт и медиа-настройки.
+ * `createEndpoint` поле `templates` не передаёт, поэтому учётка телефона от них не наследуется.
+ * `tpl_client` записывается здесь и больше нигде не читается.
+ * Вызывается один раз при старте после `createDatabaseSchema`.
  */
 export async function seedEndpointTemplates() {
   await pool.query(
@@ -493,7 +512,7 @@ export async function seedEndpointTemplates() {
     INSERT INTO ps_endpoints (
       id, transport, disallow, allow, direct_media, force_rport, rewrite_contact, rtp_symmetric
     ) VALUES (
-      'tpl_domophone', 'transport-udp', 'all', 'ulaw,alaw,h264', 'no', 'yes', 'yes', 'yes'
+      'tpl_panel', 'transport-udp', 'all', 'ulaw,alaw,h264', 'no', 'yes', 'yes', 'yes'
     )
     ON CONFLICT (id) DO UPDATE SET allow = EXCLUDED.allow;
     `

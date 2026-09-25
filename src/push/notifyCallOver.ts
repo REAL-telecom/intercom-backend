@@ -1,10 +1,10 @@
 import { env } from "../config";
-import { markCallOverPushSet } from "../store/redis";
+import { markCallOverPushSet, type Call } from "../store/redis";
 import { listPushTokens, removePushTokens } from "../store/postgres";
 import { sendFcmCallEnded } from "./fcm";
 import { sendApnsCallEndedPush } from "./apns";
 
-import type { CallData, CallEndedReason } from "../types";
+import type { CallEndedReason } from "../types";
 import type { FastifyBaseLogger } from "fastify";
 
 const CALL_ENDED_PUSH_TITLE = "Пропущенный вызов";
@@ -30,29 +30,28 @@ export const callOutcomeToEndedReason = (
 };
 
 /**
- * Notify all user devices that the call is over (one push per callId+reason).
+ * Notify all user devices that the call is over (one push per call and reason).
  * Missed reasons include title/body; others are silent. FCM and APNs run in parallel.
  */
 export const notifyCallOver = async (
-  callId: string,
-  callData: CallData,
+  call: Call,
   reason: CallEndedReason,
   logger: FastifyBaseLogger
 ): Promise<void> => {
   try {
-    if (!(await markCallOverPushSet(callId, reason, env.callTokenTtlSec))) {
-      logger.debug({ callId, reason }, "Call-over push already sent for this reason, skipping");
+    if (!(await markCallOverPushSet(call.id, reason, env.callTokenTtlSec))) {
+      logger.debug({ callId: call.id, reason }, "Call-over push already sent for this reason, skipping");
       return;
     }
 
-    const userId = callData.userId ?? null;
+    const userId = call.userId ?? null;
     if (userId === null) {
       logger.warn(
         {
-          callId,
+          callId: call.id,
           reason,
-          domophoneEndpointId: callData.domophoneEndpointId,
-          apartment: callData.apartment,
+          panelId: call.panelId,
+          apartment: call.apartment,
         },
         "No user mapping for call-ended push, skipping push"
       );
@@ -64,24 +63,24 @@ export const notifyCallOver = async (
     const iosApnsTokens = records.filter((r) => r.platform === "ios_apns").map((r) => r.pushToken);
     if (androidTokens.length === 0 && iosApnsTokens.length === 0) {
       logger.warn(
-        { callId, reason, userId },
+        { callId: call.id, reason, userId },
         "No push tokens for call-ended push, skipping push"
       );
       return;
     }
 
     const isMissed = MISSED_REASONS.has(reason);
-    const address = callData.address ?? "";
+    const address = call.address ?? "";
     const title = isMissed ? CALL_ENDED_PUSH_TITLE : undefined;
     const body = isMissed
-      ? callData.address != null && callData.address !== ""
-        ? callData.address
+      ? call.address != null && call.address !== ""
+        ? call.address
         : CALL_ENDED_PUSH_BODY_DEFAULT
       : undefined;
 
     const fcmPayload = {
       type: "SIP_CALL_ENDED" as const,
-      callId,
+      callId: call.id,
       reason,
       ...(address !== "" ? { address } : {}),
       ...(title != null ? { title } : {}),
@@ -89,7 +88,7 @@ export const notifyCallOver = async (
     };
     const apnsPayload = {
       type: "SIP_CALL_ENDED" as const,
-      callId,
+      callId: call.id,
       reason,
       ...(title != null ? { title } : {}),
       ...(body != null ? { body } : {}),
@@ -103,7 +102,7 @@ export const notifyCallOver = async (
 
     if (androidTokens.length > 0) {
       logger.info(
-        { callId, reason, tokensCount: androidTokens.length, missed: isMissed },
+        { callId: call.id, reason, tokensCount: androidTokens.length, missed: isMissed },
         "Sending FCM call-ended push"
       );
       tasks.push(
@@ -115,9 +114,9 @@ export const notifyCallOver = async (
             );
             fcmInvalidCount = fcmInvalid.length;
             invalidTokens.push(...fcmInvalid);
-            logger.info({ callId, reason }, "FCM call-ended push sent");
+            logger.info({ callId: call.id, reason }, "FCM call-ended push sent");
           } catch (error) {
-            logger.warn({ err: error, callId, reason }, "Failed to send FCM call-ended push");
+            logger.warn({ err: error, callId: call.id, reason }, "Failed to send FCM call-ended push");
           }
         })()
       );
@@ -125,7 +124,7 @@ export const notifyCallOver = async (
 
     if (iosApnsTokens.length > 0) {
       logger.info(
-        { callId, reason, tokensCount: iosApnsTokens.length, missed: isMissed },
+        { callId: call.id, reason, tokensCount: iosApnsTokens.length, missed: isMissed },
         "Sending APNs call-ended push"
       );
       tasks.push(
@@ -137,9 +136,9 @@ export const notifyCallOver = async (
             );
             apnsInvalidCount = apnsInvalid.length;
             invalidTokens.push(...apnsInvalid);
-            logger.info({ callId, reason }, "APNs call-ended push sent");
+            logger.info({ callId: call.id, reason }, "APNs call-ended push sent");
           } catch (error) {
-            logger.warn({ err: error, callId, reason }, "Failed to send APNs call-ended push");
+            logger.warn({ err: error, callId: call.id, reason }, "Failed to send APNs call-ended push");
           }
         })()
       );
@@ -151,18 +150,18 @@ export const notifyCallOver = async (
       await removePushTokens(userId, invalidTokens);
       if (fcmInvalidCount > 0) {
         logger.info(
-          { callId, userId, removedCount: fcmInvalidCount },
+          { callId: call.id, userId, removedCount: fcmInvalidCount },
           "Removed invalid FCM tokens from DB (call-ended)"
         );
       }
       if (apnsInvalidCount > 0) {
         logger.info(
-          { callId, userId, removedCount: apnsInvalidCount },
+          { callId: call.id, userId, removedCount: apnsInvalidCount },
           "Removed invalid APNs tokens from DB (call-ended)"
         );
       }
     }
   } catch (error) {
-    logger.warn({ err: error, callId, reason }, "Failed to send call-ended push");
+    logger.warn({ err: error, callId: call.id, reason }, "Failed to send call-ended push");
   }
 };

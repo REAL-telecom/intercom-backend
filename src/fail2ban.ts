@@ -1,59 +1,63 @@
 /**
  * Глоссарий.
  *
- * fail2ban — система блокировки IP после неудачных попыток. Читает journald
- *   построчно и по шаблону извлекает ip=... для бана.
- * Jail — группа правил fail2ban. Наш jail — auth, для маршрутов аутентификации.
- * SQLite — встроенная база данных. fail2ban складывает свои баны в неё,
- *   своего HTTP-API у fail2ban нет.
- * Формат строки — плоский, без JSON: fail2ban ищет поля в тексте,
- *   не в структурированных полях pino.
+ * fail2ban — система блокировки IP после неудачных попыток. Читает journald построчно и по шаблону извлекает `ip=` для бана.
+ * Jail — группа правил fail2ban. Наш jail — `auth`, для маршрутов аутентификации.
+ * SQLite — встроенная база. fail2ban складывает баны в неё. Своего HTTP-API у fail2ban нет.
+ * Формат строки — плоский, без JSON. fail2ban ищет поля в тексте, не в структурированных полях pino.
  */
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { FastifyInstance } from "fastify";
 
-// execFile запускает внешний процесс и отдаёт результат в колбэк.
-// promisify превращает колбэк в промис, чтобы читать базу fail2ban через await.
+/**
+ * execFileAsync — возвращает запуск внешней команды как промис.
+ * `execFile` отдаёт результат в колбэк. Промис нужен, чтобы читать базу fail2ban через await.
+ */
 const execFileAsync = promisify(execFile);
 
-// Путь к базе fail2ban. Читаем напрямую SQLite-файл: своего API у fail2ban нет.
+/**
+ * FAIL2BAN_DB_PATH — задаёт путь к базе fail2ban.
+ * Читаем файл SQLite напрямую: своего API у fail2ban нет.
+ */
 const FAIL2BAN_DB_PATH = "/var/lib/fail2ban/fail2ban.sqlite3";
-// Наш jail в fail2ban. Имя должно совпадать с конфигом fail2ban на сервере.
+
+/**
+ * FAIL2BAN_BACKEND_JAIL — задаёт имя jail в fail2ban.
+ * Имя должно совпадать с конфигом fail2ban на сервере.
+ */
 const FAIL2BAN_BACKEND_JAIL = "auth";
 
 /**
- * Уровни лога, которые используют строки для fail2ban.
- * error не используется: сбой одной операции не значит, что воркер сломан.
+ * LogLevel — представляет уровень строки для fail2ban.
+ * `error` сюда не входит: сбой одной операции не значит, что воркер сломан.
  */
 type LogLevel = "info" | "warn";
 
 /**
- * Экранирует строку для подстановки в SQL-литерал.
- * Заменяет одиночную кавычку на две: 'It''s'. Защита от инъекции в
- * запросы к SQLite fail2ban, куда подставляются ip и jail.
+ * toSqlLiteral — преобразует строку в SQL-литерал.
+ * Одиночная кавычка удваивается, например `It''s`. Так `ip` и jail не становятся частью запроса к SQLite fail2ban.
  *
- * @param value — произвольная строка
- * @returns строка в одинарных кавычках с экранированием
+ * @param value произвольная строка
+ * @returns строка в одинарных кавычках
  */
 function toSqlLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
 /**
- * Пишет одну строку в лог в формате, который понимает fail2ban.
+ * logFail2banLine — пишет одну строку в лог в формате, который понимает fail2ban.
+ * Формат: `[тег] сообщение ip=... phone=... route=...`.
+ * Строка без переносов: fail2ban читает журнал построчно.
  *
- * Формат: `[ТЕГ] сообщение ip=... phone=... route=...`.
- * Строка одной строкой без переносов — fail2ban читает построчно.
- *
- * @param app — приложение Fastify
- * @param level — уровень лога
- * @param tag — тег события, например AUTH_QUEUE_DROP_BANNED_IP
- * @param message — текст сообщения
- * @param ip — IP-адрес клиента
- * @param phone — телефон в канонической форме
- * @param route — маршрут, откуда пришёл запрос
+ * @param app приложение
+ * @param level уровень лога
+ * @param tag тег события, например `AUTH_QUEUE_DROP_BANNED_IP`
+ * @param message текст сообщения
+ * @param ip IP-адрес клиента
+ * @param phone телефон в канонической форме
+ * @param route маршрут, с которого пришёл запрос
  */
 export function logFail2banLine(
   app: FastifyInstance,
@@ -69,15 +73,14 @@ export function logFail2banLine(
 }
 
 /**
- * Проверяет по базе fail2ban, забанен ли IP.
+ * isClientBanned — возвращает признак активного бана IP в базе fail2ban.
+ * Запрос идёт напрямую в файл SQLite: своего HTTP-API у fail2ban нет.
+ * В таблице `bans` ищется запись с нашим jail и не истёкшим сроком.
+ * Если базу прочитать не удалось, возвращает ложь, чтобы воркер продолжал работать.
  *
- * Запрос идёт напрямую в SQLite-файл fail2ban: своего HTTP-API у него нет.
- * В таблице bans ищется запись с нашим jail и активным сроком бана.
- *
- * @param ip — IP-адрес клиента
- * @param app — приложение Fastify
- * @returns true, если IP в активном бане. При ошибке чтения базы — false,
- *   чтобы воркер продолжал работать.
+ * @param ip IP-адрес клиента
+ * @param app приложение
+ * @returns признак активного бана
  */
 export async function isClientBanned(ip: string, app: FastifyInstance): Promise<boolean> {
   const jail = toSqlLiteral(FAIL2BAN_BACKEND_JAIL);

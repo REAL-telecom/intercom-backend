@@ -1,6 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { env } from "../../config";
 import { hangupChannel, listChannels } from "../../ari";
+import { getEndpoint } from "../../store/redis";
 
 const parseAriTimestamp = (value: string | undefined): number | null => {
   if (typeof value !== "string" || value.length === 0) {
@@ -12,10 +13,26 @@ const parseAriTimestamp = (value: string | undefined): number | null => {
   return Number.isNaN(ms) ? null : ms;
 };
 
-const isTemporaryEndpointChannel = (name: string | undefined): boolean => {
+function readPjsipId(name: string | undefined): string | null {
   const namePart = name?.split("/")[1];
-  return Boolean(namePart && namePart.startsWith("tmp_"));
-};
+  if (!namePart) {
+    return null;
+  }
+  const dash = namePart.lastIndexOf("-");
+  if (dash <= 0) {
+    return null;
+  }
+  return namePart.slice(0, dash);
+}
+
+async function isPhoneChannel(name: string | undefined): Promise<boolean> {
+  const pjsipId = readPjsipId(name);
+  if (!pjsipId) {
+    return false;
+  }
+  const endpoint = await getEndpoint(pjsipId);
+  return endpoint?.type === "phone";
+}
 
 /**
  * Hang up leftover temp-endpoint channels older than maxCallDurationSec.
@@ -27,7 +44,7 @@ export const cleanupStaleChannels = async (app: FastifyInstance) => {
     const maxAgeMs = env.maxCallDurationSec * 1000;
     const now = Date.now();
     for (const channel of channels) {
-      if (!isTemporaryEndpointChannel(channel.name)) {
+      if (!(await isPhoneChannel(channel.name))) {
         continue;
       }
       const createdAtMs = parseAriTimestamp(channel.creationtime);

@@ -5,7 +5,7 @@ import { onContactStatusChange } from "./onContactStatusChange";
 import { onStasisEnd } from "./onStasisEnd";
 import { onStasisStart } from "./onStasisStart";
 
-import type { AriEvent } from "../../types";
+import type { Event } from "../../ari/websocket";
 
 /**
  * Обрабатывает событие ARI.
@@ -15,7 +15,7 @@ import type { AriEvent } from "../../types";
  * @param event — событие ARI
  * @param app — экземпляр Fastify, источник лога
  */
-export async function handleAriEvent(event: AriEvent, app: FastifyInstance): Promise<void> {
+export async function handleAriEvent(event: Event, app: FastifyInstance): Promise<void> {
   // Log all events for debugging
   app.log.info({ eventType: event.type, fullEvent: JSON.stringify(event, null, 2) }, "ARI event received");
 

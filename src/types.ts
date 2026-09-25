@@ -1,40 +1,34 @@
 /**
- * Shape of data stored under call:${callId}.
- * Incoming (domophone): channelId, endpointId, bridgeId, address.
+ * PushPlatform — представляет платформу push-токена.
+ *
+ * Значения:
+ *  - `android` — FCM
+ *  - `ios_voip` — PushKit, пуш о входящем звонке
+ *  - `ios_apns` — обычный APNs, не PushKit
  */
-export type CallData = {
-  channelId?: string;
-  endpointId?: string;
-  userId?: number;
-  apartment?: string;
-  /** Incoming only: bridge id for cleanup. */
-  bridgeId?: string;
-  /** Incoming only: display address (e.g. panel address). */
-  address?: string;
-  /** Incoming only: panel (domophone) endpoint id for "one active incoming per panel" cleanup. */
-  domophoneEndpointId?: string;
-};
-
-/**
- * Shape of data stored in channel session (StasisEnd cleanup).
- * Domophone channel: only { callId } (full call data in call:${callId}).
- * Client channel (outgoing leg): only { bridgeId }.
- */
-export type ChannelSession = {
-  bridgeId?: string;
-  callId?: string;
-};
-
 export type PushPlatform = "android" | "ios_voip" | "ios_apns";
 
-/** Body for POST /push/register. */
+/**
+ * RegisterBody — представляет тело запроса `POST /push/register`.
+ *
+ * @property userId — идентификатор пользователя
+ * @property pushToken — push-токен устройства
+ * @property platform — платформа токена
+ */
 export type RegisterBody = {
   userId: number | string;
   pushToken: string;
   platform: PushPlatform;
 };
 
-/** FCM data message payload for incoming call push. */
+/**
+ * FcmCallPayload — представляет данные FCM-сообщения о входящем звонке.
+ *
+ * @property type — вид сообщения
+ * @property callId — идентификатор звонка
+ * @property sipCredentials — учётные данные SIP
+ * @property address — адрес для показа
+ */
 export type FcmCallPayload = {
   type: "SIP_CALL";
   callId: string;
@@ -42,7 +36,17 @@ export type FcmCallPayload = {
   address: string;
 };
 
-/** Push reason for SIP_CALL_ENDED. Separate from Redis DialStatus (dial status). */
+/**
+ * CallEndedReason — представляет причину пуша `SIP_CALL_ENDED`.
+ * Это не исход дозвона из Redis: там свой набор значений.
+ *
+ * Значения:
+ *  - `timeout` — никто не ответил за окно дозвона
+ *  - `caller_hung_up` — панель сбросила, пока звонок ещё звонил
+ *  - `answered_elsewhere` — трубку взяли
+ *  - `declined_elsewhere` — отклонили через завершение звонка
+ *  - `ended` — разговор уже шёл, и канал панели завершился
+ */
 export type CallEndedReason =
   | "timeout"
   | "caller_hung_up"
@@ -50,7 +54,17 @@ export type CallEndedReason =
   | "declined_elsewhere"
   | "ended";
 
-/** FCM data message payload for "call ended" push. title/body only for missed-call banner. */
+/**
+ * FcmCallEndedPayload — представляет данные FCM-сообщения о конце звонка.
+ * `title` и `body` есть только у пропущенного: их показывает баннер.
+ *
+ * @property type — вид сообщения
+ * @property callId — идентификатор звонка
+ * @property address — адрес для показа
+ * @property reason — причина конца звонка
+ * @property title — заголовок баннера пропущенного
+ * @property body — текст баннера пропущенного
+ */
 export type FcmCallEndedPayload = {
   type: "SIP_CALL_ENDED";
   callId: string;
@@ -60,7 +74,15 @@ export type FcmCallEndedPayload = {
   body?: string;
 };
 
-/** APNs VoIP payload for incoming call push (flat string values, same keys as FCM data). */
+/**
+ * ApnsVoipCallPayload — представляет данные APNs VoIP о входящем звонке.
+ * Плоские строки, те же ключи, что у данных FCM.
+ *
+ * @property type — вид сообщения
+ * @property callId — идентификатор звонка
+ * @property sipCredentials — учётные данные SIP
+ * @property address — адрес для показа
+ */
 export type ApnsVoipCallPayload = {
   type: "SIP_CALL";
   callId: string;
@@ -68,7 +90,16 @@ export type ApnsVoipCallPayload = {
   address: string;
 };
 
-/** APNs payload for "call ended" push (regular APNs, not PushKit). title/body only for missed. */
+/**
+ * ApnsCallEndedPayload — представляет данные обычного APNs о конце звонка.
+ * Это не PushKit. `title` и `body` есть только у пропущенного.
+ *
+ * @property type — вид сообщения
+ * @property callId — идентификатор звонка
+ * @property reason — причина конца звонка
+ * @property title — заголовок баннера пропущенного
+ * @property body — текст баннера пропущенного
+ */
 export type ApnsCallEndedPayload = {
   type: "SIP_CALL_ENDED";
   callId: string;
@@ -77,26 +108,35 @@ export type ApnsCallEndedPayload = {
   body?: string;
 };
 
-/** Stored push token with platform (android FCM, ios_voip, or ios_apns). */
+/**
+ * PushTokenRecord — представляет сохранённый push-токен и его платформу.
+ *
+ * @property pushToken — токен устройства
+ * @property platform — платформа токена
+ */
 export type PushTokenRecord = {
   pushToken: string;
   platform: PushPlatform;
 };
 
-/** ARI WebSocket event shape. */
-export type AriEvent = {
-  type: string;
-  [key: string]: unknown;
-};
-
-export type AriEventHandler = (event: AriEvent) => void | Promise<void>;
-
-/** ARI bridge response shape. */
-export type AriBridge = {
-  id: string;
-};
-
-/** Allowed ARI hangup reasons for DELETE /channels/{channelId}?reason=. */
+/**
+ * HangupReason — представляет причину сброса канала, которую принимает ARI в `DELETE /channels/{channelId}`.
+ *
+ * Значения:
+ *  - `normal` — обычное завершение
+ *  - `busy` — занято
+ *  - `congestion` — перегрузка
+ *  - `no_answer` — нет ответа
+ *  - `timeout` — таймаут
+ *  - `rejected` — отклонено
+ *  - `unallocated` — номер не назначен
+ *  - `normal_unspecified` — обычное завершение без уточнения
+ *  - `number_incomplete` — номер набран не до конца
+ *  - `codec_mismatch` — не совпали кодеки
+ *  - `interworking` — сбой согласования сетей
+ *  - `failure` — сбой
+ *  - `answered_elsewhere` — ответили на другом устройстве
+ */
 export type HangupReason =
   | "normal"
   | "busy"

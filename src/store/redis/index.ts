@@ -3,7 +3,6 @@ export { redisClient } from "./client";
 export {
   setCall,
   getCall,
-  getCallId,
   setDialStatus,
   getDialStatus,
   addDialedChannel,
@@ -12,20 +11,18 @@ export {
   removeDialedContact,
   setEndpoint,
   getEndpoint,
+  deleteEndpoint,
   setChannel,
   getChannel,
   setOriginate,
   getOriginate,
   deleteOriginate,
-  setPanel,
-  getPanel,
-  deletePanel,
   clearCall,
   markBridgeForCleanup,
   markCallOverPushSet,
 } from "./calls";
 
-export type { DialStatus } from "./calls";
+export type { Call, DialStatus, Endpoint } from "./calls";
 
 export { setOtp, getOtp, deleteOtp } from "./otp/codes";
 

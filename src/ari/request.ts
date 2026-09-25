@@ -1,22 +1,21 @@
 /**
  * Глоссарий.
  *
- * Идемпотентный запрос — запрос, многократное выполнение которого с теми же
- *   параметрами не меняет конечного состояния системы по сравнению
- *   с однократным выполнением. При повторе не возникает побочных эффектов:
- *   двойного создания, дублирования данных. HTTP-методы GET, PUT и DELETE
- *   идемпотентны. POST — нет.
- * Предикат — функция, возвращающая булево значение.
- * Промис (Promise) — результат асинхронной операции с состояниями
- *   pending / fulfilled / rejected.
+ * Идемпотентный запрос — запрос, повтор которого с теми же параметрами не меняет конечное состояние по сравнению с одним выполнением.
+ * Повтор не создаёт объект второй раз и не дублирует данные.
+ * Методы GET, PUT и DELETE идемпотентны. POST не идемпотентен.
+ * Предикат — функция, которая возвращает булево значение.
+ * Промис — результат асинхронной операции `Promise`. Состояния: `pending`, `fulfilled`, `rejected`.
  */
 
 import { getAuthHeader, getBaseUrl } from "./utils";
 
 /**
- * Ошибка HTTP-ответа ARI: сервер вернул res.ok === false.
- * Хранит status и body для диагностики. От транспортных ошибок (сеть, DNS,
- * таймаут) отличается наличием HTTP-статуса.
+ * AriRequestError — представляет ошибку HTTP-ответа ARI.
+ * Сервер вернул ответ с неуспешным статусом.
+ *
+ * @property body — тело ответа для диагностики
+ * @property status — HTTP-статус ответа
  */
 export class AriRequestError extends Error {
   readonly body: string;
@@ -31,9 +30,11 @@ export class AriRequestError extends Error {
 }
 
 /**
- * Транспортная ошибка ARI: сеть, DNS, таймаут fetch.
- * Флаг isTimeout отделяет таймаут (AbortSignal.timeout) от прочих сетевых
- * сбоев. Причина сохраняется в cause с учётом вложенных обёрток Node fetch.
+ * AriTransportError — представляет транспортную ошибку запроса ARI.
+ * HTTP-ответа нет: сеть, DNS или таймаут.
+ *
+ * @property cause — исходная ошибка
+ * @property isTimeout — признак таймаута, а не прочего сетевого сбоя
  */
 export class AriTransportError extends Error {
   readonly cause: unknown;
@@ -48,19 +49,16 @@ export class AriTransportError extends Error {
 }
 
 /**
- * Предельное время одного ARI-запроса в миллисекундах.
+ * REQUEST_TIMEOUT_MS — задаёт предел ожидания одного запроса ARI.
  */
 const REQUEST_TIMEOUT_MS = 10_000;
 
 /**
- * Возвращает признак: ошибка вызвана таймаутом или прерыванием.
+ * isTimeoutError — возвращает признак таймаута или прерывания.
+ * Node fetch прячет `AbortError` внутрь `TypeError`, поэтому проверяется цепочка `cause`.
  *
- * Проверяет саму ошибку и цепочку error.cause до 5 уровней: Node fetch
- * заворачивает AbortSignal.timeout в TypeError, и настоящая причина
- * лежит внутри.
- *
- * @param error — любая ошибка, пойманная в запросе
- * @returns true, если ошибка или её причина по цепочке cause — таймаут или прерывание
+ * @param error любая пойманная ошибка
+ * @returns признак таймаута или прерывания
  */
 function isTimeoutError(error: unknown): boolean {
   let current: unknown = error;
@@ -77,10 +75,10 @@ function isTimeoutError(error: unknown): boolean {
 }
 
 /**
- * Приводит любую транспортную ошибку к типу AriTransportError.
+ * toTransportError — преобразует ошибку запроса в `AriTransportError`.
  *
- * @param error — исходная ошибка любого типа
- * @returns AriTransportError с человекочитаемым сообщением и флагом isTimeout
+ * @param error исходная ошибка
+ * @returns ошибка с сообщением и признаком таймаута
  */
 function toTransportError(error: unknown): AriTransportError {
   const isTimeout = isTimeoutError(error);
@@ -92,11 +90,10 @@ function toTransportError(error: unknown): AriTransportError {
 }
 
 /**
- * Возвращает текст ошибки запроса в одном формате.
+ * formatRequestError — возвращает текст ошибки запроса в одном формате.
  *
- * @param error — любая ошибка
- * @returns строка вида `status body` для AriRequestError, message для остальных,
- *   String(error) как запасной вариант
+ * @param error любая ошибка
+ * @returns текст ошибки
  */
 export function formatRequestError(error: unknown): string {
   return error instanceof AriRequestError
@@ -107,18 +104,21 @@ export function formatRequestError(error: unknown): string {
 }
 
 /**
- * Выполняет ARI REST-запрос.
+ * request — выполняет REST-запрос к ARI.
  *
- * Возвращает ошибки, приведённые к типу:
- *   - AriRequestError со status и body при не-ok HTTP,
- *   - AriTransportError с флагом isTimeout при сетевых сбоях и таймауте fetch.
+ * Как работает:
+ * 1. Отправляет запрос и ждёт не дольше `REQUEST_TIMEOUT_MS`
+ * 2. При неуспешном статусе бросает `AriRequestError` со статусом и телом ответа
+ * 3. При статусе `204` и при пустом теле возвращает `undefined`
+ * 4. Разбирает тело как JSON, а если разбор не удался, возвращает текст
+ * 5. Готовую `AriRequestError` пробрасывает дальше, прочую ошибку бросает как `AriTransportError`
  *
- * 204 No Content и пустое тело успешного ответа дают undefined as T.
- *
- * @param path — путь относительно базового URL ARI, включая query-строку
- * @param method — HTTP-метод, по умолчанию GET
- * @param body — тело запроса, сериализуется в JSON, если передано
- * @returns распарсенный JSON, строку при неудачном парсинге или undefined
+ * @param path путь относительно базового URL ARI, включая query-строку
+ * @param method HTTP-метод
+ * @param body тело запроса
+ * @returns разобранное тело, текст при неудачном разборе или `undefined`
+ * @throws `AriRequestError` при неуспешном HTTP-статусе
+ * @throws `AriTransportError` при сбое до HTTP-ответа
  */
 export async function request<T = unknown>(path: string, method = "GET", body?: unknown) {
   const init: RequestInit = {

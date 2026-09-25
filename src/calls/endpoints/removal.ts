@@ -1,6 +1,15 @@
 import { FastifyInstance } from "fastify";
-import { deleteEndpoint } from "../../ari";
-import { clearCall, getCallId } from "../../store/redis";
+import type { FastifyBaseLogger } from "fastify";
+import { continueInDialplan, deleteEndpoint as deleteSipEndpoint, hangupChannel } from "../../ari";
+import { cleanupBridge, type CleanupBridgeContext } from "../bridges/cleanup";
+import {
+  clearCall,
+  deleteEndpoint as deleteEndpointRecord,
+  deleteOriginate,
+  getEndpoint,
+  listDialedChannels,
+  type Call,
+} from "../../store/redis";
 
 /**
  * Сколько ждать снятия последнего контакта после конца звонка, миллисекунды.
@@ -27,9 +36,10 @@ export const removeTemporarySipEndpoint = async (
 ) => {
   cancelEndpointRemoval(endpointId);
   try {
-    await deleteEndpoint(endpointId);
+    await deleteSipEndpoint(endpointId);
+    const endpoint = await getEndpoint(endpointId);
     const callId =
-      (typeof logCtx.callId === "string" && logCtx.callId) || getCallId(endpointId);
+      (typeof logCtx.callId === "string" && logCtx.callId) || endpoint?.callId;
     if (callId) {
       try {
         await clearCall(callId, endpointId);
@@ -48,6 +58,71 @@ export const removeTemporarySipEndpoint = async (
     );
   }
 };
+
+export type PanelExit = "busy" | "noanswer" | "gone";
+
+/**
+ * Завершает медиа звонка и ставит учётку телефона в очередь на снятие.
+ *
+ * Замок панели снимается первым. call: остаётся до удаления учётки через ARI,
+ * чтобы дворник не принял её за сироту.
+ *
+ * @param call — запись звонка
+ * @param panelExit — куда уходит канал панели: busy, noanswer или уже вышел
+ * @param source — откуда пришла уборка, для лога моста
+ * @param logger — логгер
+ * @param app — экземпляр Fastify для таймера снятия учётки
+ */
+export async function finishCall(
+  call: Call,
+  panelExit: PanelExit,
+  source: CleanupBridgeContext["source"],
+  logger: FastifyBaseLogger,
+  app: FastifyInstance
+): Promise<void> {
+  if (call.panelId) {
+    const panelEndpoint = await getEndpoint(call.panelId);
+    if (panelEndpoint?.callId === call.id) {
+      await deleteEndpointRecord(call.panelId);
+    }
+  }
+  const dialedChannelIds = await listDialedChannels(call.id);
+  for (const dialedChannelId of dialedChannelIds) {
+    await hangupChannel(dialedChannelId, logger);
+  }
+  if (call.channelId && panelExit !== "gone") {
+    try {
+      await continueInDialplan(call.channelId, "panel", panelExit, 1);
+    } catch (error) {
+      logger.warn(
+        { err: error, channelId: call.channelId, callId: call.id },
+        "finishCall: failed to return panel channel to dialplan"
+      );
+    }
+  }
+  if (call.bridgeId) {
+    // "gone" — панель уже ушла или ушла нога: канал панели не щадить, иначе он зависнет в Stasis
+    const skipChannelId = panelExit === "gone" ? undefined : call.channelId;
+    await cleanupBridge(
+      call.bridgeId,
+      skipChannelId,
+      {
+        callId: call.id,
+        ...(call.channelId ? { channelId: call.channelId } : {}),
+        source,
+      },
+      logger
+    );
+  }
+  if (call.phoneId) {
+    try {
+      await deleteOriginate(call.phoneId);
+    } catch (error) {
+      logger.warn({ err: error, callId: call.id, phoneId: call.phoneId }, "finishCall: failed to clear originate");
+    }
+    armEndpointRemoval(call.phoneId, { callId: call.id, source }, app);
+  }
+}
 
 /**
  * Взводит удаление учётки, если снятие последнего контакта не придёт.

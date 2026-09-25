@@ -9,7 +9,7 @@ import {
 } from "../ari";
 import { AriRequestError } from "../ari/request";
 import { parseDialContacts } from "./parsers";
-import { listTemporaryEndpoints } from "../store/postgres";
+import { listPhoneEndpoints } from "../store/postgres";
 import {
   addDialedChannel,
   addDialedContact,
@@ -21,8 +21,6 @@ import {
   listDialedChannels,
   removeDialedContact,
 } from "../store/redis";
-
-import type { CallData, ChannelSession } from "../types";
 
 export type DialPendingSource = "event" | "poll";
 
@@ -44,7 +42,7 @@ export const dialPendingContacts = async (endpointId: string, source: DialPendin
     return;
   }
 
-  const pendingChannelSession = await getChannelRecord<ChannelSession>(pending.channelId);
+  const pendingChannelSession = await getChannelRecord<{ callId?: string }>(pending.channelId);
   const pendingCallId = pendingChannelSession?.callId;
   if (!pendingCallId) {
     await deleteOriginate(endpointId);
@@ -52,20 +50,20 @@ export const dialPendingContacts = async (endpointId: string, source: DialPendin
     return;
   }
 
-  const pendingCallData = await getCall<CallData>(pendingCallId);
+  const pendingCall = await getCall(pendingCallId);
   const pendingOutcome = await getDialStatus(pendingCallId);
   if (
-    !pendingCallData ||
+    !pendingCall ||
     pendingOutcome !== null ||
-    pendingCallData.endpointId !== endpointId
+    pendingCall.phoneId !== endpointId
   ) {
     await deleteOriginate(endpointId);
     app.log.info(
       {
         endpointId,
-        callId: pendingCallId,
+        callId: pendingCall?.id ?? pendingCallId,
         outcome: pendingOutcome,
-        actualEndpointId: pendingCallData?.endpointId,
+        actualPhoneId: pendingCall?.phoneId,
         source,
       },
       "Dropped stale pending originate: call is no longer pending"
@@ -87,7 +85,7 @@ export const dialPendingContacts = async (endpointId: string, source: DialPendin
       return;
     }
 
-    const appArgs = `outgoing,${pending.bridgeId},${endpointId}`;
+    const appArgs = `phone,${pending.bridgeId},${pendingCallId}`;
     for (const dialContact of dialContacts) {
       if ((await getDialStatus(pendingCallId)) !== null) {
         break;
@@ -190,7 +188,7 @@ export const dialPendingContacts = async (endpointId: string, source: DialPendin
  */
 export const checkPendingOriginate = async (app: FastifyInstance) => {
   try {
-    const endpointIds = await listTemporaryEndpoints();
+    const endpointIds = await listPhoneEndpoints();
     for (const endpointId of endpointIds) {
       await dialPendingContacts(endpointId, "poll", app);
     }

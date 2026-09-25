@@ -1,9 +1,9 @@
 import { FastifyInstance } from "fastify";
 import { cleanupBridge } from "../bridges/cleanup";
 
-import type { AriEvent } from "../../types";
+import type { Event } from "../../ari/websocket";
 
-export const onChannelLeftBridge = async (event: AriEvent, app: FastifyInstance) => {
+export const onChannelLeftBridge = async (event: Event, app: FastifyInstance) => {
   const bridge = event.bridge as { id?: string; channels?: string[] };
   const bridgeId = bridge.id;
   if (!bridgeId) {

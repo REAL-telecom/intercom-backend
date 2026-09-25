@@ -1,4 +1,4 @@
-import type { AriEvent } from "../types";
+import type { Event } from "../ari/websocket";
 
 /**
  * Split PJSIP_DIAL_CONTACTS output into ARI originate endpoints.
@@ -23,7 +23,7 @@ export const CONTACT_APPEARED_STATUSES = new Set(["Created", "NonQualified", "Re
  *
  * Иначе null: чужая учётка или битое тело события.
  */
-export const readContactStatus = (event: AriEvent): { aor: string; contactStatus: string } | null => {
+export const readContactStatus = (event: Event): { aor: string; contactStatus: string } | null => {
   const contactInfo = event.contact_info;
   if (!contactInfo || typeof contactInfo !== "object") {
     return null;
@@ -35,16 +35,13 @@ export const readContactStatus = (event: AriEvent): { aor: string; contactStatus
   if (typeof info.contact_status !== "string") {
     return null;
   }
-  if (!info.aor.startsWith("tmp_")) {
-    return null;
-  }
   return { aor: info.aor, contactStatus: info.contact_status };
 };
 
 /**
  * Адрес записи временной учётки, если в событии контакт только что появился.
  */
-export const readAppearedContactAor = (event: AriEvent): string | null => {
+export const readAppearedContactAor = (event: Event): string | null => {
   const contact = readContactStatus(event);
   if (!contact || !CONTACT_APPEARED_STATUSES.has(contact.contactStatus)) {
     return null;
@@ -55,7 +52,7 @@ export const readAppearedContactAor = (event: AriEvent): string | null => {
 /**
  * Адрес записи временной учётки, если в событии контакт снялся.
  */
-export const readRemovedContactAor = (event: AriEvent): string | null => {
+export const readRemovedContactAor = (event: Event): string | null => {
   const contact = readContactStatus(event);
   if (!contact || contact.contactStatus !== "Removed") {
     return null;

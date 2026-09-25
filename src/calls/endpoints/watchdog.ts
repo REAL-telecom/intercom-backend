@@ -2,17 +2,14 @@ import { FastifyInstance } from "fastify";
 import { getChannelVariable } from "../../ari";
 import { parseDialContacts } from "../parsers";
 import { removeTemporarySipEndpoint } from "./removal";
-import { listTemporaryEndpoints } from "../../store/postgres";
+import { listPhoneEndpoints } from "../../store/postgres";
 import {
   getCall,
-  getCallId,
   getDialStatus,
   getEndpoint,
   getOriginate,
   listDialedChannels,
 } from "../../store/redis";
-
-import type { CallData } from "../../types";
 
 /**
  * Cleanup temporary endpoints if Redis TTL expired.
@@ -20,17 +17,15 @@ import type { CallData } from "../../types";
  */
 export const cleanupStaleEndpoints = async (app: FastifyInstance) => {
   try {
-    const endpointIds = await listTemporaryEndpoints();
+    const endpointIds = await listPhoneEndpoints();
     for (const endpointId of endpointIds) {
-      const session = await getEndpoint(endpointId);
-      const callId = getCallId(endpointId);
-      const callData = callId ? await getCall<CallData>(callId) : null;
-
-      if (session && callData) {
+      const endpoint = await getEndpoint(endpointId);
+      const call = endpoint ? await getCall(endpoint.callId) : null;
+      if (endpoint && call) {
         continue;
       }
 
-      await removeTemporarySipEndpoint(endpointId, { reason: "ttl-expired" }, app);
+      await removeTemporarySipEndpoint(endpointId, { callId: endpoint?.callId, reason: "ttl-expired" }, app);
     }
   } catch (error) {
     app.log.warn({ err: error }, "Cleanup: failed to cleanup stale endpoints");
@@ -43,12 +38,13 @@ export const cleanupStaleEndpoints = async (app: FastifyInstance) => {
  * true — кто-то ещё внутри. false — пусто. null — прочитать не удалось, канал уже нет.
  */
 const hasRemainingContacts = async (endpointId: string): Promise<boolean | null> => {
-  const callId = getCallId(endpointId);
+  const endpoint = await getEndpoint(endpointId);
+  const callId = endpoint?.callId;
   const channelIds: string[] = [];
   if (callId) {
-    const callData = await getCall<CallData>(callId);
-    if (callData?.channelId) {
-      channelIds.push(callData.channelId);
+    const call = await getCall(callId);
+    if (call?.channelId) {
+      channelIds.push(call.channelId);
     }
     channelIds.push(...(await listDialedChannels(callId)));
   }
@@ -82,7 +78,8 @@ const hasRemainingContacts = async (endpointId: string): Promise<boolean | null>
  * контактов прочитать нельзя, ждём таймер после конца звонка.
  */
 export const removeEndpointIfNoContacts = async (endpointId: string, app: FastifyInstance) => {
-  const callId = getCallId(endpointId);
+  const endpoint = await getEndpoint(endpointId);
+  const callId = endpoint?.callId;
   const outcome = callId ? await getDialStatus(callId) : null;
   if (callId && outcome === null) {
     app.log.info({ endpointId, callId }, "ContactStatusChange: contact removed while call still pending");

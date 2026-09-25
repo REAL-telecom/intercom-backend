@@ -1,16 +1,12 @@
 /**
  * Глоссарий.
  *
- * channel (канал) — объект ARI: соединение с одним endpoint, через которое
- *   идёт обмен медиа.
- * dialplan (диалплан) — сценарий обработки вызова внутри Asterisk.
- * Stasis — приложение Asterisk ARI: точка передачи управления каналом
- *   внешнему приложению.
- * originate (оригинация) — операция ARI: Asterisk сам создаёт исходящий
- *   канал на endpoint. Эндпоинт `POST /channels` в документации ARI описан
- *   как «Create a new channel (originate)».
- *
- * Ring — состояние канала: входящий звонок звонит, трубка не взята.
+ * Канал — объект ARI `channel`. Соединение с одним endpoint, через которое идёт обмен медиа.
+ * Диалплан — сценарий обработки вызова внутри Asterisk. В ARI называется `dialplan`.
+ * Stasis — приложение ARI. Точка, в которой управление каналом переходит внешнему приложению.
+ * Оригинация — операция ARI, при которой Asterisk сам создаёт исходящий канал на endpoint.
+ * В документации ARI это `POST /channels`, «Create a new channel».
+ * Ring — состояние канала: входящий звонок звонит, трубка ещё не взята.
  * Up — состояние канала: разговор идёт, участники соединены.
  */
 
@@ -21,21 +17,23 @@ import type { FastifyBaseLogger } from "fastify";
 import type { HangupReason } from "../types";
 
 /**
- * Статус попытки повесить трубку каналу, который мог уже исчезнуть.
+ * HangupStatus — представляет статус попытки сбросить канал, который мог уже исчезнуть.
  *
- *   hungUp      — канал существовал и мы его сбросили
- *   alreadyGone — канала уже нет (404 или id не передан)
- *   failed      — сбросить не получилось по другой причине
+ * Значения:
+ *  - `hungUp` — канал существовал и сброшен
+ *  - `alreadyGone` — канала уже нет
+ *  - `failed` — сбросить не получилось по другой причине
  */
 type HangupStatus = "hungUp" | "alreadyGone" | "failed";
 
 /**
- * Создаёт канал в Stasis: Asterisk сам звонит на endpoint, управление приходит в приложение.
+ * createChannelInStasis — создаёт канал в Stasis.
+ * Asterisk сам звонит на endpoint, управление приходит в приложение.
  *
- * @param endpoint — контакт PJSIP вида `PJSIP/<endpoint_id>`
- * @param appArgs — аргументы, которые приложение получит в StasisStart
- * @returns объект с идентификатором созданного канала
- * @throws Error, если ARI не вернул id канала
+ * @param endpoint контакт PJSIP вида `PJSIP/<endpoint_id>`
+ * @param appArgs аргументы, которые приложение получит в `StasisStart`
+ * @returns идентификатор созданного канала
+ * @throws `Error`, если ARI не вернул идентификатор канала
  */
 export async function createChannelInStasis(endpoint: string, appArgs: string) {
   const channel = await request<{ id?: string }>("/channels", "POST", {
@@ -50,16 +48,11 @@ export async function createChannelInStasis(endpoint: string, appArgs: string) {
 }
 
 /**
- * Создаёт канал сразу в диалплане, минуя Stasis.
+ * createChannelInDialplan — создаёт канал сразу в диалплане, минуя Stasis.
+ * Переменные из `params.variables` доступны в диалплане.
+ * Используется для рассылки OTP-кодов и обзвона.
  *
- * Переменные канала доступны в диалплане как ${VAR}. Используется для сценариев,
- * где канал создаётся сразу в диалплане: рассылка OTP-кодов, обзвон.
- *
- * @param params.endpoint — контакт PJSIP вида `PJSIP/<endpoint_id>`
- * @param params.context — контекст диалплана
- * @param params.extension — экстеншен (номер)
- * @param params.priority — приоритет
- * @param params.variables — переменные канала, доступные в диалплане
+ * @param params контакт, контекст, экстеншен, приоритет и переменные канала
  * @returns ответ ARI на создание канала
  */
 export async function createChannelInDialplan(params: {
@@ -79,10 +72,10 @@ export async function createChannelInDialplan(params: {
 }
 
 /**
- * Возвращает информацию о канале, включая состояние.
+ * getChannel — возвращает состояние канала.
  *
- * @param channelId — идентификатор канала ARI
- * @returns объект канала с полями `id`, `state`, `name`, `caller`, `connected`
+ * @param channelId идентификатор канала
+ * @returns состояние канала
  */
 export async function getChannel(channelId: string) {
   return request<{ id: string; state: string; name: string; caller: { number: string }; connected: { number: string } }>(
@@ -91,10 +84,10 @@ export async function getChannel(channelId: string) {
 }
 
 /**
- * Возвращает список всех активных каналов.
+ * listChannels — возвращает активные каналы.
+ * Если ARI вернул не массив, результат пустой.
  *
- * @returns список каналов с полями `id`, `name`, `creationtime`; пустой список,
- *   если ARI вернул не массив
+ * @returns активные каналы
  */
 export async function listChannels() {
   const channels = await request<{ id: string; name: string; creationtime: string }[]>("/channels");
@@ -102,14 +95,13 @@ export async function listChannels() {
 }
 
 /**
- * Возвращает значение переменной или функции канала.
+ * getChannelVariable — возвращает значение переменной канала.
+ * Запрос вычисляет функции диалплана, в отличие от `GET /asterisk/variable`.
+ * Отсутствующее значение приходит пустой строкой. Статус `404` обрабатывает вызывающий код.
  *
- * В отличие от GET /asterisk/variable этот эндпоинт вычисляет функции диалплана.
- * 404 означает, что канал или переменная не найдены, вызывающий обязан это обработать.
- *
- * @param channelId — идентификатор канала ARI
- * @param variable — имя переменной или функции диалплана
- * @returns значение переменной или пустая строка, если поле `value` отсутствует
+ * @param channelId идентификатор канала
+ * @param variable имя переменной или функции диалплана
+ * @returns значение переменной
  */
 export async function getChannelVariable(channelId: string, variable: string): Promise<string> {
   const params = new URLSearchParams({ variable });
@@ -120,34 +112,34 @@ export async function getChannelVariable(channelId: string, variable: string): P
 }
 
 /**
- * Отвечает на входящий канал: переводит из состояния Ring (звонит) в Up (разговор).
+ * answerChannel — отвечает на входящий канал.
+ * Переводит канал из Ring в Up.
  *
- * @param channelId — идентификатор канала ARI
+ * @param channelId идентификатор канала
+ * @returns результат запроса
  */
 export async function answerChannel(channelId: string) {
   return request(`/channels/${channelId}/answer`, "POST");
 }
 
 /**
- * Ставит входящий канал на удержание.
+ * holdChannel — ставит входящий канал на удержание.
  *
- * @param channelId — идентификатор канала ARI
+ * @param channelId идентификатор канала
+ * @returns результат запроса
  */
 export async function holdChannel(channelId: string) {
   return request(`/channels/${channelId}/hold`, "POST");
 }
 
 /**
- * Выводит канал из Stasis и продолжает его в диалплане.
+ * continueInDialplan — выводит канал из Stasis и продолжает его в диалплане.
+ * Канал покидает мост сам. Так канал панели возвращается в диалплан и завершает вызов, например на ветке `noanswer`, `busy` или `invalid`.
  *
- * Канал покидает мост автоматически. Используется, чтобы вернуть канал панели
- * в диалплан: там он попадёт на нужную ветку (noanswer, busy, invalid) и корректно
- * завершит вызов.
- *
- * @param channelId — идентификатор канала ARI
- * @param context — контекст диалплана
- * @param extension — экстеншен (номер)
- * @param priority — приоритет
+ * @param channelId идентификатор канала
+ * @param context контекст диалплана
+ * @param extension экстеншен
+ * @param priority приоритет
  */
 export async function continueInDialplan(
   channelId: string,
@@ -164,17 +156,14 @@ export async function continueInDialplan(
 }
 
 /**
- * Пытается повесить трубку каналу, если он ещё существует.
+ * hangupChannel — пытается сбросить канал, если он ещё существует.
+ * Без идентификатора и при статусе `404` возвращает `alreadyGone`.
+ * Прочую ошибку пишет в лог и возвращает `failed`.
  *
- * Возвращает статус:
- *   hungUp      — канал сброшен
- *   alreadyGone — id не передан или ARI уже снёс канал (404)
- *   failed      — сбросить не получилось по другой причине
- *
- * @param channelId — id канала или null/undefined, если id неизвестен
- * @param logger — логгер Fastify
- * @param reason — необязательная причина, уходит query-параметром (answered_elsewhere и т.п.)
- * @returns статус попытки сброса
+ * @param channelId идентификатор канала или пустое значение, если он неизвестен
+ * @param logger логгер
+ * @param reason причина сброса
+ * @returns статус попытки
  */
 export async function hangupChannel(
   channelId: string | null | undefined,

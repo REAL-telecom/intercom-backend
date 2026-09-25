@@ -25,7 +25,7 @@ docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "I
 **Endpoint**
 
 ```bash
-docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "INSERT INTO ps_endpoints (id, transport, aors, auth, context, templates, disallow, allow, direct_media, force_rport, rewrite_contact, rtp_symmetric) VALUES ('${TEST_DOMOPHONE_PJSIP_ID}','transport-udp','${TEST_DOMOPHONE_PJSIP_ID}','${TEST_DOMOPHONE_PJSIP_ID}','from-domophone','tpl_domophone','all','ulaw,alaw,h264','no','yes','yes','yes') ON CONFLICT (id) DO UPDATE SET context = EXCLUDED.context, templates = EXCLUDED.templates, allow = EXCLUDED.allow;"
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "INSERT INTO ps_endpoints (id, transport, aors, auth, context, templates, disallow, allow, direct_media, force_rport, rewrite_contact, rtp_symmetric) VALUES ('${TEST_DOMOPHONE_PJSIP_ID}','transport-udp','${TEST_DOMOPHONE_PJSIP_ID}','${TEST_DOMOPHONE_PJSIP_ID}','panel','tpl_panel','all','ulaw,alaw,h264','no','yes','yes','yes') ON CONFLICT (id) DO UPDATE SET context = EXCLUDED.context, templates = EXCLUDED.templates, allow = EXCLUDED.allow;"
 ```
 ### 3) Проверить данные в Postgres
 

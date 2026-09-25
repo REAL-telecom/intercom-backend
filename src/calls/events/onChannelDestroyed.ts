@@ -2,9 +2,9 @@ import { FastifyInstance } from "fastify";
 import { cleanupOtpChannel } from "../../otp/dialer";
 import { deleteOriginate, getCall, getChannel } from "../../store/redis";
 
-import type { AriEvent, CallData, ChannelSession } from "../../types";
+import type { Event } from "../../ari/websocket";
 
-export const onChannelDestroyed = async (event: AriEvent, app: FastifyInstance) => {
+export const onChannelDestroyed = async (event: Event, app: FastifyInstance) => {
   const channel = event.channel as { id?: string };
   if (!channel.id) return;
   const channelId = channel.id;
@@ -15,16 +15,16 @@ export const onChannelDestroyed = async (event: AriEvent, app: FastifyInstance) 
       return;
     }
 
-    const channelSession = await getChannel<ChannelSession>(channelId);
-    const callId = channelSession?.callId;
+    const channelRecord = await getChannel<{ callId?: string }>(channelId);
+    const callId = channelRecord?.callId;
     if (!callId) return;
 
-    const callData = await getCall<CallData>(callId);
-    const endpointId = callData?.endpointId;
-    if (!endpointId) return;
+    const call = await getCall(callId);
+    const phoneId = call?.phoneId;
+    if (!phoneId) return;
 
-    await deleteOriginate(endpointId);
-    app.log.info({ channelId, callId, endpointId }, "ChannelDestroyed: cleared pending originate");
+    await deleteOriginate(phoneId);
+    app.log.info({ channelId, callId: call?.id, phoneId }, "ChannelDestroyed: cleared pending originate");
   } catch (error) {
     app.log.warn({ err: error, channelId }, "ChannelDestroyed: failed to clear pending originate");
   }

@@ -1,27 +1,29 @@
 import { env } from "../config";
 
 /**
- * Возвращает базовый URL ARI REST без учётных данных в URL.
+ * getBaseUrl — возвращает базовый URL REST ARI.
+ * Учётные данные в URL не входят.
  *
- * @returns базовый URL с хостом и портом из конфигурации
+ * @returns базовый URL
  */
 export function getBaseUrl() {
   return `http://${env.ariHost}:${env.ariPort}/ari`;
 }
 
 /**
- * Возвращает URL ARI WebSocket для потока событий без учётных данных в URL.
+ * getWsUrl — возвращает URL потока событий ARI.
+ * Учётные данные в URL не входят.
  *
- * @returns URL сокета с именем приложения из конфигурации
+ * @returns URL сокета
  */
 export function getWsUrl() {
   return `ws://${env.ariHost}:${env.ariPort}/ari/events?app=${env.ariAppName}`;
 }
 
 /**
- * Возвращает HTTP Basic Authorization заголовок для запросов ARI.
+ * getAuthHeader — возвращает значение заголовка `Authorization` для запросов ARI.
  *
- * @returns значение заголовка `Authorization` с учётными данными из конфигурации
+ * @returns значение заголовка
  */
 export function getAuthHeader() {
   const token = Buffer.from(`${env.ariUser}:${env.ariPassword}`).toString("base64");

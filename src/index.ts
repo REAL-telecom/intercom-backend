@@ -54,19 +54,18 @@ const app = Fastify({
 app.register(sensible);
 
 /**
- * Интервал дворника временных учёток.
- *
+ * STALE_ENDPOINT_CLEANUP_MS — задаёт интервал дворника учёток телефона.
  * После событийного снятия он страховка, не основной уборщик.
  */
 const STALE_ENDPOINT_CLEANUP_MS = 10 * 60 * 1000;
 
 /**
- * Интервал проверки просроченных каналов, миллисекунды.
+ * STALE_CHANNEL_CLEANUP_MS — задаёт интервал проверки просроченных каналов.
  */
 const STALE_CHANNEL_CLEANUP_MS = 60_000;
 
 /**
- * Интервал опроса ожидающих дозвона, миллисекунды.
+ * PENDING_ORIGINATE_CHECK_MS — задаёт интервал опроса ожидающих дозвона.
  */
 const PENDING_ORIGINATE_CHECK_MS = 2_000;
 
@@ -75,8 +74,7 @@ let isCleaningStaleChannels = false;
 let isCheckingPendingOriginate = false;
 
 /**
- * Запускает сервер по порядку: база, маршруты, воркер, таймеры, ARI, приём запросов.
- *
+ * start — запускает сервер по порядку: база, маршруты, воркер, таймеры, ARI, приём запросов.
  * Ошибка базы или listen завершает процесс: без базы сервер принимать запросы не должен.
  */
 async function start(): Promise<void> {
@@ -134,7 +132,7 @@ async function start(): Promise<void> {
       });
   }, STALE_CHANNEL_CLEANUP_MS);
 
-  // Опрос ожидающих дозвона: читает Postgres, зовёт checkPendingOriginate по каждой временной учётке.
+  // Опрос ожидающих дозвона: читает Postgres, зовёт checkPendingOriginate по каждой учётке телефона.
   const pendingOriginateTimer = setInterval(() => {
     if (isCheckingPendingOriginate) {
       app.log.debug("Skipping pending originate check, previous pass still running");
