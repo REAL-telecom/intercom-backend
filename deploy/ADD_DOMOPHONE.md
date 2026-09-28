@@ -14,32 +14,32 @@ set -a && source .env && set +a
 **AOR**
 
 ```bash
-docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "INSERT INTO ps_aors (id, max_contacts) VALUES ('${TEST_DOMOPHONE_PJSIP_ID}', 1) ON CONFLICT (id) DO UPDATE SET max_contacts = 1;"
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "INSERT INTO ps_aors (id, max_contacts) VALUES ('${TEST_PANEL_PJSIP_ID}', 1) ON CONFLICT (id) DO UPDATE SET max_contacts = 1;"
 ```
 
 **Auth**
 
 ```bash
-docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "INSERT INTO ps_auths (id, auth_type, username, password) VALUES ('${TEST_DOMOPHONE_PJSIP_ID}', 'userpass', '${TEST_DOMOPHONE_AUTH_USERNAME}', '${TEST_DOMOPHONE_AUTH_PASSWORD}') ON CONFLICT (id) DO UPDATE SET username = EXCLUDED.username, password = EXCLUDED.password;"
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "INSERT INTO ps_auths (id, auth_type, username, password) VALUES ('${TEST_PANEL_PJSIP_ID}', 'userpass', '${TEST_PANEL_AUTH_USERNAME}', '${TEST_PANEL_AUTH_PASSWORD}') ON CONFLICT (id) DO UPDATE SET username = EXCLUDED.username, password = EXCLUDED.password;"
 ```
 **Endpoint**
 
 ```bash
-docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "INSERT INTO ps_endpoints (id, transport, aors, auth, context, templates, disallow, allow, direct_media, force_rport, rewrite_contact, rtp_symmetric) VALUES ('${TEST_DOMOPHONE_PJSIP_ID}','transport-udp','${TEST_DOMOPHONE_PJSIP_ID}','${TEST_DOMOPHONE_PJSIP_ID}','panel','tpl_panel','all','ulaw,alaw,h264','no','yes','yes','yes') ON CONFLICT (id) DO UPDATE SET context = EXCLUDED.context, templates = EXCLUDED.templates, allow = EXCLUDED.allow;"
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "INSERT INTO ps_endpoints (id, transport, aors, auth, context, templates, disallow, allow, direct_media, force_rport, rewrite_contact, rtp_symmetric) VALUES ('${TEST_PANEL_PJSIP_ID}','transport-udp','${TEST_PANEL_PJSIP_ID}','${TEST_PANEL_PJSIP_ID}','panel','tpl_panel','all','ulaw,alaw,h264','no','yes','yes','yes') ON CONFLICT (id) DO UPDATE SET context = EXCLUDED.context, templates = EXCLUDED.templates, allow = EXCLUDED.allow;"
 ```
 ### 3) Проверить данные в Postgres
 
 ```bash
 docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
-SELECT id, max_contacts FROM ps_aors WHERE id = '${TEST_DOMOPHONE_PJSIP_ID}';
+SELECT id, max_contacts FROM ps_aors WHERE id = '${TEST_PANEL_PJSIP_ID}';
 "
 
 docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
-SELECT id, username, password FROM ps_auths WHERE id = '${TEST_DOMOPHONE_PJSIP_ID}';
+SELECT id, username, password FROM ps_auths WHERE id = '${TEST_PANEL_PJSIP_ID}';
 "
 
 docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
-SELECT id, transport, aors, auth FROM ps_endpoints WHERE id = '${TEST_DOMOPHONE_PJSIP_ID}';
+SELECT id, transport, aors, auth FROM ps_endpoints WHERE id = '${TEST_PANEL_PJSIP_ID}';
 "
 ```
 
@@ -53,13 +53,13 @@ sudo systemctl restart asterisk
 В панели домофона в настройках SIP указать:
 - SIP сервер: `SERVER_DOMAIN`
 - SIP порт: `5060`
-- Логин: `TEST_DOMOPHONE_AUTH_USERNAME`
-- Пароль: `TEST_DOMOPHONE_AUTH_PASSWORD`
+- Логин: `TEST_PANEL_AUTH_USERNAME`
+- Пароль: `TEST_PANEL_AUTH_PASSWORD`
 
 Дождитесь регистрации панели. После этого проверить появление контакта в Asterisk:
 
 ```bash
-sudo asterisk -rx "pjsip show aor ${TEST_DOMOPHONE_PJSIP_ID}"
+sudo asterisk -rx "pjsip show aor ${TEST_PANEL_PJSIP_ID}"
 ```
 
 **Пример вывода:**

@@ -4,10 +4,10 @@ import { continueInDialplan, deleteEndpoint as deleteSipEndpoint, hangupChannel 
 import { cleanupBridge, type CleanupBridgeContext } from "../bridges/cleanup";
 import {
   clearCall,
-  deleteEndpoint as deleteEndpointRecord,
   deleteOriginate,
   getEndpoint,
   listDialedChannels,
+  releaseEndpoint,
   type Call,
 } from "../../store/redis";
 
@@ -81,10 +81,7 @@ export async function finishCall(
   app: FastifyInstance
 ): Promise<void> {
   if (call.panelId) {
-    const panelEndpoint = await getEndpoint(call.panelId);
-    if (panelEndpoint?.callId === call.id) {
-      await deleteEndpointRecord(call.panelId);
-    }
+    await releaseEndpoint(call.panelId, call.id);
   }
   const dialedChannelIds = await listDialedChannels(call.id);
   for (const dialedChannelId of dialedChannelIds) {

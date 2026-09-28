@@ -15,10 +15,10 @@ import { callOutcomeToEndedReason, notifyCallOver } from "../../../push/notifyCa
 import { listPushTokens, removePushTokens } from "../../../store/postgres";
 import {
   clearCall,
-  deleteEndpoint,
   getCall,
   getDialStatus,
   getEndpoint,
+  releaseEndpoint,
   setCall,
   setChannel,
   setDialStatus,
@@ -28,7 +28,7 @@ import {
 import { onPhoneStasisStart } from "./phone";
 import { readPanel, type PanelCall } from "./panel";
 
-import type { Event } from "../../../ari/websocket";
+import type { Event } from "../../../ari";
 
 const INCOMING_MAX_CONTACTS = 8;
 
@@ -43,8 +43,8 @@ async function assembleIncomingCall(
   const sipUsername = phoneId;
   const sipPassword = crypto.randomBytes(8).toString("hex");
   await setCall(
-    callId,
     {
+      id: callId,
       channelId,
       phoneId,
       userId,
@@ -106,13 +106,12 @@ async function assembleIncomingCall(
     if (!storedCall) {
       throw new Error("Call record missing before bridge update");
     }
-    const { id: storedCallId, ...callFields } = storedCall;
-    await setCall(callId, { ...callFields, bridgeId: bridge.id }, env.callTokenTtlSec);
+    await setCall({ ...storedCall, bridgeId: bridge.id }, env.callTokenTtlSec);
     if (panelId) {
       await setEndpoint(panelId, { callId, type: "panel" }, env.callTokenTtlSec);
     }
     await setEndpoint(phoneId, { callId, type: "phone" }, env.callTokenTtlSec);
-    app.log.info({ callId: storedCallId, channelId, phoneId, ttlSec: env.callTokenTtlSec }, "Call data stored");
+    app.log.info({ callId, channelId, phoneId, ttlSec: env.callTokenTtlSec }, "Call data stored");
     await setOriginate(phoneId, { bridgeId: bridge.id, channelId }, env.ringTimeoutSec);
     app.log.info({ phoneId, bridgeId: bridge.id }, "STEP 4: Pending originate stored, waiting for endpoint registration.");
     bridgeId = bridge.id;
@@ -120,10 +119,10 @@ async function assembleIncomingCall(
     app.log.error({ err: error, callId, channelId, phoneId }, "CRITICAL: Failed to setup bridge/originate - call will not connect");
     if (panelId) {
       try {
-        await deleteEndpoint(panelId);
+        await releaseEndpoint(panelId, callId);
         app.log.info(
           { callId, panelId, channelId },
-          "Setup failed: cleared active incoming panel lock"
+          "Setup failed: released panel lock if this call held it"
         );
       } catch (clearError) {
         app.log.warn(

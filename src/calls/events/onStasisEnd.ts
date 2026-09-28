@@ -10,7 +10,7 @@ import {
   type Call,
 } from "../../store/redis";
 
-import type { Event } from "../../ari/websocket";
+import type { Event } from "../../ari";
 
 export const onStasisEnd = async (event: Event, app: FastifyInstance) => {
   const channel = event.channel as { id?: string };
@@ -19,7 +19,7 @@ export const onStasisEnd = async (event: Event, app: FastifyInstance) => {
 
   app.log.info({ channelId }, "StasisEnd - channel terminated, cleaning up bridge");
 
-  const channelRecord = await getChannel<{ callId?: string }>(channelId);
+  const channelRecord = await getChannel(channelId);
   let call: Call | null = null;
   if (channelRecord?.callId) {
     call = await getCall(channelRecord.callId);

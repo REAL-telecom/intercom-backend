@@ -1,4 +1,4 @@
-import type { Event } from "../ari/websocket";
+import type { Event } from "../ari";
 
 /**
  * Split PJSIP_DIAL_CONTACTS output into ARI originate endpoints.

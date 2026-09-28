@@ -4,7 +4,7 @@ import { removeEndpointIfNoContacts } from "../endpoints";
 import { readAppearedContactAor, readRemovedContactAor } from "../parsers";
 import { getEndpoint } from "../../store/redis";
 
-import type { Event } from "../../ari/websocket";
+import type { Event } from "../../ari";
 
 async function isPhoneEndpoint(pjsipId: string): Promise<boolean> {
   const endpoint = await getEndpoint(pjsipId);

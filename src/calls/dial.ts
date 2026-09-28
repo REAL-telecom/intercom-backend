@@ -5,9 +5,9 @@ import {
   getChannelVariable,
   hangupChannel,
   createChannelInStasis,
+  AriRequestError,
   AriTransportError,
 } from "../ari";
-import { AriRequestError } from "../ari/request";
 import { parseDialContacts } from "./parsers";
 import { listPhoneEndpoints } from "../store/postgres";
 import {
@@ -35,14 +35,12 @@ export type DialPendingSource = "event" | "poll";
  * @param app — экземпляр Fastify, источник лога
  */
 export const dialPendingContacts = async (endpointId: string, source: DialPendingSource, app: FastifyInstance) => {
-  const pending = await getOriginate<{ bridgeId: string; channelId: string }>(
-    endpointId
-  );
+  const pending = await getOriginate(endpointId);
   if (!pending) {
     return;
   }
 
-  const pendingChannelSession = await getChannelRecord<{ callId?: string }>(pending.channelId);
+  const pendingChannelSession = await getChannelRecord(pending.channelId);
   const pendingCallId = pendingChannelSession?.callId;
   if (!pendingCallId) {
     await deleteOriginate(endpointId);

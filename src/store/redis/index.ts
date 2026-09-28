@@ -11,7 +11,7 @@ export {
   removeDialedContact,
   setEndpoint,
   getEndpoint,
-  deleteEndpoint,
+  releaseEndpoint,
   setChannel,
   getChannel,
   setOriginate,
@@ -22,7 +22,7 @@ export {
   markCallOverPushSet,
 } from "./calls";
 
-export type { Call, DialStatus, Endpoint } from "./calls";
+export type { Call } from "./calls";
 
 export { setOtp, getOtp, deleteOtp } from "./otp/codes";
 

@@ -16,7 +16,7 @@ import {
   setDialStatus,
 } from "../../../store/redis";
 
-import type { Event } from "../../../ari/websocket";
+import type { Event } from "../../../ari";
 
 /**
  * connectPhoneChannel — сажает ногу в мост и отвечает на канал панели.

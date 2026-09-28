@@ -1,7 +1,6 @@
 import { env } from "../../config";
 import { markBridgeForCleanup } from "../../store/redis";
-import { hangupChannel, deleteBridge, getBridge } from "../../ari";
-import { AriRequestError } from "../../ari/request";
+import { hangupChannel, deleteBridge, getBridge, AriRequestError } from "../../ari";
 
 import type { FastifyBaseLogger } from "fastify";
 

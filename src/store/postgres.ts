@@ -100,7 +100,18 @@ export async function createDatabaseSchema() {
       max_contacts INTEGER,
       contact TEXT,
       default_expiration INTEGER,
-      maximum_expiration INTEGER
+      maximum_expiration INTEGER,
+      minimum_expiration INTEGER,
+      qualify_frequency INTEGER,
+      qualify_timeout DOUBLE PRECISION,
+      qualify_2xx_only TEXT,
+      authenticate_qualify TEXT,
+      remove_existing TEXT,
+      remove_unavailable TEXT,
+      support_path TEXT,
+      mailboxes TEXT,
+      voicemail_extension TEXT,
+      outbound_proxy TEXT
     );
   `);
   await pool.query(`
@@ -109,7 +120,15 @@ export async function createDatabaseSchema() {
       auth_type TEXT,
       username TEXT,
       password TEXT,
-      realm TEXT
+      realm TEXT,
+      md5_cred TEXT,
+      password_digest TEXT,
+      nonce_lifetime INTEGER,
+      supported_algorithms_uac TEXT,
+      supported_algorithms_uas TEXT,
+      refresh_token TEXT,
+      oauth_clientid TEXT,
+      oauth_secret TEXT
     );
   `);
   await pool.query(`
@@ -179,7 +198,7 @@ export async function createDatabaseSchema() {
  * @property letter — литера, если есть
  * @property structure — строение, если есть
  */
-export type Address = {
+type Address = {
   id: number;
   street: string;
   house: string;
@@ -274,7 +293,7 @@ export function formatAddress(record: Address): string {
  * @property ip — IP-адрес панели
  * @property address_id — идентификатор адреса дома
  */
-export type Panel = {
+type Panel = {
   id: number;
   ip: string;
   address_id: number;
@@ -332,7 +351,7 @@ export async function getPanel(ip: string): Promise<Panel | null> {
  * @property id — идентификатор пользователя
  * @property phone — телефон
  */
-export type ApartmentUser = {
+type ApartmentUser = {
   id: number;
   phone: string;
 };
@@ -368,7 +387,7 @@ export async function getUser(
  * @property phone — телефон
  * @property pushToken — последний push-токен или пусто, если токена нет
  */
-export type User = {
+type User = {
   id: number;
   phone: string;
   pushToken: string | null;

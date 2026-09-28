@@ -11,7 +11,7 @@
  *  - идентификатор панели для замка одного входящего.
  * Пароль SIP в эту запись не пишется: он уходит в Asterisk при создании учётки телефона.
  * Остальные ключи звонка производны от этой записи.
- * Исход дозвона — ключ `dial_status:${callId}`.
+ * Результат вызова (набора номера) — ключ `dial_status:${callId}`.
  * Имя взято у DIALSTATUS из Asterisk, но значения наши:
  *  - `accepted` — трубку взяли,
  *  - `rejected` — отклонили через `/calls/end`,
@@ -44,7 +44,8 @@ import { redisClient } from "./client";
 
 /**
  * Call — представляет запись звонка.
- * В записи канал панели, учётка телефона, пользователь, квартира, мост, адрес и панель.
+ * В записи канал панели, учётка телефона, пользователь и квартира пишутся всегда.
+ * Мост, адрес и панель могут отсутствовать.
  *
  * @property id — идентификатор звонка
  * @property channelId — канал панели
@@ -57,10 +58,10 @@ import { redisClient } from "./client";
  */
 export type Call = {
   id: string;
-  channelId?: string;
-  phoneId?: string;
-  userId?: number;
-  apartment?: string;
+  channelId: string;
+  phoneId: string;
+  userId: number;
+  apartment: string;
   bridgeId?: string;
   address?: string;
   panelId?: string;
@@ -69,18 +70,16 @@ export type Call = {
 // ─── Данные звонка ──────────────────────────────────────────────────
 
 /**
- * setCall — сохраняет запись звонка по идентификатору с TTL.
- * В записи канал панели, идентификатор учётки телефона, мост, адрес, пользователь и квартира.
+ * setCall — сохраняет запись звонка с TTL.
+ * Ключ берётся из идентификатора внутри записи.
  * Пароль SIP сюда не входит.
  *
- * @param callId идентификатор звонка
- * @param payload поля звонка без идентификатора. Идентификатор берётся из `callId`
+ * @param payload запись звонка
  * @param ttlSec время жизни записи в секундах
  */
-export async function setCall(callId: string, payload: Omit<Call, "id">, ttlSec: number) {
-  const key = `call:${callId}`;
-  const call: Call = { ...payload, id: callId };
-  await redisClient.set(key, JSON.stringify(call), "EX", ttlSec);
+export async function setCall(payload: Call, ttlSec: number) {
+  const key = `call:${payload.id}`;
+  await redisClient.set(key, JSON.stringify(payload), "EX", ttlSec);
 }
 
 /**
@@ -95,14 +94,14 @@ export async function getCall(callId: string): Promise<Call | null> {
   if (!value) {
     return null;
   }
-  const stored = JSON.parse(value) as Omit<Call, "id">;
-  return { ...stored, id: callId };
+  return JSON.parse(value) as Call;
 }
 
 /**
  * clearCall — стирает данные звонка целиком одним действием.
- * Удаляет разом ключи данных, исхода дозвона, контактов, каналов, ячеек `endpoint:` и канала, панель звонка.
- * Нельзя удалять только исход дозвона: данные звонка закрывают ложный пропущенный вызов.
+ * Удаляет разом ключи данных, результата вызова, контактов, каналов и ячейки учётки телефона.
+ * Замок панели снимает `releaseEndpoint`.
+ * Нельзя удалять только результат вызова: данные звонка закрывают ложный пропущенный вызов.
  *
  * @param callId идентификатор звонка
  * @param endpointId идентификатор учётки телефона, если уже известен. Иначе берётся из записи звонка
@@ -128,20 +127,17 @@ export async function clearCall(callId: string, endpointId?: string): Promise<vo
   }
   const panelId = call?.panelId;
   if (panelId) {
-    const panelEndpoint = await getEndpoint(panelId);
-    if (panelEndpoint?.callId === callId) {
-      keys.push(`endpoint:${panelId}`);
-    }
+    await releaseEndpoint(panelId, callId);
   }
   if (keys.length > 0) {
     await redisClient.del(...keys);
   }
 }
 
-// ─── Исход дозвона ──────────────────────────────────────────────────
+// ─── Результат вызова ───────────────────────────────────────────────
 
 /**
- * DialStatus — представляет исход дозвона.
+ * DialStatus — представляет результат вызова.
  * Отсутствие ключа означает, что дозвон продолжается.
  *
  * Значения:
@@ -150,17 +146,17 @@ export async function clearCall(callId: string, endpointId?: string): Promise<vo
  *  - `canceled` — панель сбросила трубку, пока звонок звонил
  *  - `timedOut` — никто не ответил за окно дозвона
  */
-export type DialStatus = "accepted" | "rejected" | "canceled" | "timedOut";
+type DialStatus = "accepted" | "rejected" | "canceled" | "timedOut";
 
 /**
- * setDialStatus — сохраняет исход дозвона.
- * Вызывается только из победившей ветки, там, где исход дозвона уже определён.
- * `NX` защищает от гонки, если два пути решат записать исход дозвона одновременно.
+ * setDialStatus — сохраняет результат вызова.
+ * Вызывается только из победившей ветки, там, где результат вызова уже определён.
+ * `NX` защищает от гонки, если два пути решат записать результат вызова одновременно.
  *
  * @param callId идентификатор звонка
- * @param status сохраняемый исход дозвона
+ * @param status сохраняемый результат вызова
  * @param ttlSec время жизни записи в секундах
- * @returns истина, если исход дозвона поставил этот вызов, ложь, если он уже был
+ * @returns истина, если результат записан сейчас, ложь, если он уже стоял
  */
 export async function setDialStatus(
   callId: string,
@@ -173,10 +169,10 @@ export async function setDialStatus(
 }
 
 /**
- * getDialStatus — возвращает сохранённый исход дозвона.
+ * getDialStatus — возвращает сохранённый результат вызова.
  *
  * @param callId идентификатор звонка
- * @returns исход дозвона или `null`, если он ещё не установлен
+ * @returns результат вызова или `null`, если он ещё не установлен
  */
 export async function getDialStatus(callId: string): Promise<DialStatus | null> {
   const key = `dial_status:${callId}`;
@@ -302,7 +298,7 @@ export async function removeDialedContact(callId: string, contact: string): Prom
  * @property callId — идентификатор звонка
  * @property type — `panel` или `phone`
  */
-export type Endpoint = {
+type Endpoint = {
   callId: string;
   type: "panel" | "phone";
 };
@@ -354,25 +350,48 @@ export async function getEndpoint(pjsipId: string): Promise<Endpoint | null> {
 }
 
 /**
+ * releaseEndpoint — освобождает ячейку `endpoint:`, если её держит этот звонок.
+ * Ячейка с другим звонком остаётся.
+ *
+ * @param pjsipId идентификатор объекта PJSIP
+ * @param callId идентификатор звонка, который держит ячейку
+ */
+export async function releaseEndpoint(pjsipId: string, callId: string): Promise<void> {
+  const endpoint = await getEndpoint(pjsipId);
+  if (endpoint?.callId === callId) {
+    await deleteEndpoint(pjsipId);
+  }
+}
+
+/**
  * deleteEndpoint — удаляет ячейку `endpoint:` в Redis.
  * Строку PJSIP в Asterisk не трогает.
  *
  * @param pjsipId идентификатор объекта PJSIP
  */
-export async function deleteEndpoint(pjsipId: string): Promise<void> {
+async function deleteEndpoint(pjsipId: string): Promise<void> {
   const key = `endpoint:${pjsipId}`;
   await redisClient.del(key);
 }
+
+/**
+ * Channel — представляет ячейку `channel:`.
+ *
+ * @property callId — идентификатор звонка
+ */
+type Channel = {
+  callId: string;
+};
 
 /**
  * setChannel — сохраняет запись канала ARI с TTL.
  * В записи идентификатор звонка, чтобы убрать канал по событию `StasisEnd`.
  *
  * @param channelId идентификатор канала ARI
- * @param payload данные канала
+ * @param payload запись канала
  * @param ttlSec время жизни в секундах
  */
-export async function setChannel(channelId: string, payload: object, ttlSec: number) {
+export async function setChannel(channelId: string, payload: Channel, ttlSec: number) {
   const key = `channel:${channelId}`;
   await redisClient.set(key, JSON.stringify(payload), "EX", ttlSec);
 }
@@ -380,29 +399,39 @@ export async function setChannel(channelId: string, payload: object, ttlSec: num
 /**
  * getChannel — возвращает запись канала ARI.
  *
- * @template T форма сохранённой записи
  * @param channelId идентификатор канала ARI
- * @returns данные канала или `null`, если записи нет или истёк срок
+ * @returns запись канала или `null`, если её нет или истёк срок
  */
-export async function getChannel<T>(channelId: string) {
+export async function getChannel(channelId: string): Promise<Channel | null> {
   const key = `channel:${channelId}`;
   const value = await redisClient.get(key);
-  return value ? (JSON.parse(value) as T) : null;
+  return value ? (JSON.parse(value) as Channel) : null;
 }
 
 // ─── Ожидание дозвона ───────────────────────────────────────────────
+
+/**
+ * Originate — представляет ячейку `originate:`.
+ *
+ * @property bridgeId — идентификатор моста
+ * @property channelId — идентификатор канала панели
+ */
+type Originate = {
+  bridgeId: string;
+  channelId: string;
+};
 
 /**
  * setOriginate — сохраняет заявку на дозвон с TTL.
  * Дозвон уходит, когда у учётки телефона появляется контакт.
  *
  * @param endpointId идентификатор учётки телефона
- * @param payload мост и канал панели для дозвона
+ * @param payload заявка на дозвон
  * @param ttlSec время жизни заявки в секундах
  */
 export async function setOriginate(
   endpointId: string,
-  payload: { bridgeId: string; channelId: string },
+  payload: Originate,
   ttlSec: number
 ) {
   const key = `originate:${endpointId}`;
@@ -412,14 +441,13 @@ export async function setOriginate(
 /**
  * getOriginate — возвращает заявку на дозвон.
  *
- * @template T форма сохранённой заявки
  * @param endpointId идентификатор учётки телефона
- * @returns данные заявки или `null`, если записи нет или истёк срок
+ * @returns заявка на дозвон или `null`, если записи нет или истёк срок
  */
-export async function getOriginate<T>(endpointId: string) {
+export async function getOriginate(endpointId: string): Promise<Originate | null> {
   const key = `originate:${endpointId}`;
   const value = await redisClient.get(key);
-  return value ? (JSON.parse(value) as T) : null;
+  return value ? (JSON.parse(value) as Originate) : null;
 }
 
 /**

@@ -48,7 +48,7 @@ const hasRemainingContacts = async (endpointId: string): Promise<boolean | null>
     }
     channelIds.push(...(await listDialedChannels(callId)));
   }
-  const pending = await getOriginate<{ channelId: string }>(endpointId);
+  const pending = await getOriginate(endpointId);
   if (pending?.channelId) {
     channelIds.push(pending.channelId);
   }

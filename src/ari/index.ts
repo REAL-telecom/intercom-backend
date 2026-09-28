@@ -7,14 +7,14 @@
  * Через ARI приложение строит свой сценарий вызова и не ограничено обычным диалпланом.
  */
 
-export { AriTransportError } from "./request";
-export { websocket } from "./websocket";
+export { AriRequestError, AriTransportError } from "./request";
+export { websocket, type Event } from "./websocket";
 export {
   createChannelInStasis,
   createChannelInDialplan,
   getChannel,
-  listChannels,
   getChannelVariable,
+  listChannels,
   answerChannel,
   holdChannel,
   continueInDialplan,

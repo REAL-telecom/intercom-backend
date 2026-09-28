@@ -27,7 +27,7 @@ export type Event = {
 /**
  * EventHandler — представляет обработчик события из потока ARI.
  */
-export type EventHandler = (event: Event) => void | Promise<void>;
+type EventHandler = (event: Event) => void | Promise<void>;
 
 /**
  * ARI_RECONNECT_MIN_DELAY_MS — задаёт первую паузу между попытками переподключения.
