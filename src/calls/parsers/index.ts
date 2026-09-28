@@ -19,9 +19,9 @@ export const parseDialContacts = (dialString: string): string[] => {
 export const CONTACT_APPEARED_STATUSES = new Set(["Created", "NonQualified", "Reachable", "Unknown"]);
 
 /**
- * Адрес записи и статус контакта временной учётки из события.
+ * Адрес записи и статус контакта временной учётной записи из события.
  *
- * Иначе null: чужая учётка или битое тело события.
+ * Иначе null: чужая учётная запись или битое тело события.
  */
 export const parseContactStatus = (event: Event): { aor: string; contactStatus: string } | null => {
   const contactInfo = event.contact_info;
@@ -39,7 +39,7 @@ export const parseContactStatus = (event: Event): { aor: string; contactStatus: 
 };
 
 /**
- * Адрес записи временной учётки, если в событии контакт только что появился.
+ * Адрес записи временной учётной записи, если в событии контакт только что появился.
  */
 export const parseAppearedContactAor = (event: Event): string | null => {
   const contact = parseContactStatus(event);
@@ -50,7 +50,7 @@ export const parseAppearedContactAor = (event: Event): string | null => {
 };
 
 /**
- * Адрес записи временной учётки, если в событии контакт снялся.
+ * Адрес записи временной учётной записи, если в событии контакт снялся.
  */
 export const parseRemovedContactAor = (event: Event): string | null => {
   const contact = parseContactStatus(event);
@@ -61,11 +61,11 @@ export const parseRemovedContactAor = (event: Event): string | null => {
 };
 
 /**
- * parsePjsipId — принимает имя канала и возвращает id учётки.
+ * parsePjsipId — принимает имя канала и возвращает id учётной записи.
  * Хвост Asterisk после последнего дефиса отбрасывается.
  *
  * @param name имя канала
- * @returns id учётки или null, если имя не разобрано
+ * @returns id учётной записи или null, если имя не разобрано
  */
 export function parsePjsipId(name: string | undefined): string | null {
   const namePart = name?.split("/")[1];

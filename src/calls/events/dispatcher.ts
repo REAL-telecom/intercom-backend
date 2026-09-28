@@ -10,7 +10,7 @@ import type { Event } from "#ari";
 /**
  * Обрабатывает событие ARI.
  *
- * Реагирует на ContactStatusChange, ChannelDestroyed, StasisStart, StasisEnd, ChannelLeftBridge.
+ * Реагирует на `ContactStatusChange`, `ChannelDestroyed`, `StasisStart`, `StasisEnd`, `ChannelLeftBridge`.
  *
  * @param event — событие ARI
  * @param app — экземпляр Fastify, источник лога

@@ -16,13 +16,13 @@ export type PanelCall = {
 };
 
 /**
- * Читает панель и абонента из StasisStart.
+ * Читает панель и абонента из `StasisStart`.
  *
  * Нет абонента — канал уходит в invalid, запись звонка не создаётся.
  *
  * @param channel — канал панели из события
  * @param channelId — идентификатор канала ARI
- * @param eventArgs — аргументы Stasis: panel, IP, квартира
+ * @param eventArgs — аргументы стасиса: panel, IP, квартира
  * @param callId — идентификатор звонка, уже выбранный обработчиком
  * @param app — экземпляр Fastify
  * @returns данные панели или null, если звонок некому принять

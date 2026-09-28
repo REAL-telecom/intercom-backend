@@ -14,8 +14,8 @@ import { cancelAllEndpointRemovals, cleanupStaleEndpoints } from "./calls/endpoi
 import { startOtpDialer } from "./otp/dialer";
 
 // Пути к сертификатам Let's Encrypt:
-//  - fullchain.pem — цепочка публичных ключей,
-//  - privkey.pem — приватный ключ домена.
+//  - fullchain.pem — цепочка публичных ключей
+//  - privkey.pem — приватный ключ домена
 // Если файлов нет, сервис работает по HTTP.
 const certPath = `/etc/letsencrypt/live/${env.serverDomain}/fullchain.pem`;
 const keyPath = `/etc/letsencrypt/live/${env.serverDomain}/privkey.pem`;
@@ -54,7 +54,7 @@ const app = Fastify({
 app.register(sensible);
 
 /**
- * STALE_ENDPOINT_CLEANUP_MS — задаёт интервал дворника учёток телефона.
+ * STALE_ENDPOINT_CLEANUP_MS — задаёт интервал дворника учётных записей телефона.
  * После событийного снятия он страховка, не основной уборщик.
  */
 const STALE_ENDPOINT_CLEANUP_MS = 10 * 60 * 1000;

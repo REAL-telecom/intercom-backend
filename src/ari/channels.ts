@@ -1,10 +1,10 @@
 /**
  * Глоссарий.
  *
- * Канал — объект ARI `channel`. Соединение с одним endpoint, через которое идёт обмен медиа.
+ * Канал — объект ARI `channel`. Соединение с одним эндпоинтом, через которое идёт обмен медиа.
  * Диалплан — сценарий обработки вызова внутри Asterisk. В ARI называется `dialplan`.
- * Stasis — приложение ARI. Точка, в которой управление каналом переходит внешнему приложению.
- * Оригинация — операция ARI, при которой Asterisk сам создаёт исходящий канал на endpoint.
+ * Стасис — приложение ARI `Stasis`. Точка, в которой управление каналом переходит внешнему приложению.
+ * Оригинация — операция ARI, при которой Asterisk сам создаёт исходящий канал на эндпоинт.
  * В документации ARI это `POST /channels`, «Create a new channel».
  * Ring — состояние канала: входящий звонок звонит, трубка ещё не взята.
  * Up — состояние канала: разговор идёт, участники соединены.
@@ -27,8 +27,8 @@ import type { HangupReason } from "../types";
 type HangupStatus = "hungUp" | "alreadyGone" | "failed";
 
 /**
- * createChannelInStasis — создаёт канал в Stasis.
- * Asterisk сам звонит на endpoint, управление приходит в приложение.
+ * createChannelInStasis — создаёт канал в стасисе.
+ * Asterisk сам звонит на эндпоинт, управление приходит в приложение.
  *
  * @param endpoint контакт PJSIP вида `PJSIP/<endpoint_id>`
  * @param appArgs аргументы, которые приложение получит в `StasisStart`
@@ -48,7 +48,7 @@ export async function createChannelInStasis(endpoint: string, appArgs: string) {
 }
 
 /**
- * createChannelInDialplan — создаёт канал сразу в диалплане, минуя Stasis.
+ * createChannelInDialplan — создаёт канал сразу в диалплане, минуя стасис.
  * Переменные из `params.variables` доступны в диалплане.
  * Используется для рассылки OTP-кодов и обзвона.
  *
@@ -133,7 +133,7 @@ export async function holdChannel(channelId: string) {
 }
 
 /**
- * continueInDialplan — выводит канал из Stasis и продолжает его в диалплане.
+ * continueInDialplan — выводит канал из стасиса и продолжает его в диалплане.
  * Канал покидает мост сам. Так канал панели возвращается в диалплан и завершает вызов, например на ветке `noanswer`, `busy` или `invalid`.
  *
  * @param channelId идентификатор канала

@@ -88,7 +88,7 @@ async function handleOtpCall(app: FastifyInstance) {
   }
 
   try {
-    // Оригинация в диалплан, не в Stasis: для OTP-звонка ARI не нужен,
+    // Оригинация в диалплан, не в стасис: для OTP-звонка ARI не нужен,
     // достаточно проиграть голосом код и повесить трубку.
     const channel = (await createChannelInDialplan({
       endpoint: `PJSIP/${phone}@${OTP_TRUNK}`,

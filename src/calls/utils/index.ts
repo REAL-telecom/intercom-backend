@@ -8,16 +8,16 @@ import { deleteOriginate, listDialedChannels, releaseEndpoint, type Call } from 
 export type PanelExit = "busy" | "noanswer" | "gone";
 
 /**
- * Завершает медиа звонка и ставит учётку телефона в очередь на снятие.
+ * Завершает медиа звонка и ставит учётную запись телефона в очередь на снятие.
  *
- * Замок панели снимается первым. call: остаётся до удаления учётки через ARI,
+ * Замок панели снимается первым. call: остаётся до удаления учётной записи через ARI,
  * чтобы дворник не принял её за сироту.
  *
  * @param call — запись звонка
  * @param panelExit — куда уходит канал панели: busy, noanswer или уже вышел
  * @param source — откуда пришла уборка, для лога моста
  * @param logger — логгер
- * @param app — экземпляр Fastify для таймера снятия учётки
+ * @param app — экземпляр Fastify для таймера снятия учётной записи
  */
 export async function finishCall(
   call: Call,
@@ -44,7 +44,7 @@ export async function finishCall(
     }
   }
   if (call.bridgeId) {
-    // "gone" — панель уже ушла или ушла нога: канал панели не щадить, иначе он зависнет в Stasis
+    // "gone" — панель уже ушла или ушла нога: канал панели не щадить, иначе он зависнет в стасисе
     const skipChannelId = panelExit === "gone" ? undefined : call.channelId;
     await cleanupBridge(
       call.bridgeId,
