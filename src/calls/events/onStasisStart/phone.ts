@@ -1,22 +1,22 @@
 import { FastifyInstance } from "fastify";
-import { env } from "../../../config";
+import { env } from "#config";
 import {
   addChannelToBridge,
   answerChannel,
   getBridge,
   hangupChannel,
-} from "../../../ari";
-import { finishCall } from "../../endpoints";
-import { notifyCallOver } from "../../../push/notifyCallOver";
+} from "#ari";
+import { finishCall } from "../../utils";
+import { notifyCallOver } from "#push/notifyCallOver";
 import {
   getCall,
   getDialStatus,
   listDialedChannels,
   setChannel,
   setDialStatus,
-} from "../../../store/redis";
+} from "#store/redis";
 
-import type { Event } from "../../../ari";
+import type { Event } from "#ari";
 
 /**
  * connectPhoneChannel — сажает ногу в мост и отвечает на канал панели.

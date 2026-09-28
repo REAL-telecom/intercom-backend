@@ -13,6 +13,28 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "imports": {
+    "#ari": {
+      "types": "./src/ari/index.ts",
+      "default": "./dist/ari/index.js"
+    },
+    "#config": {
+      "types": "./src/config/index.ts",
+      "default": "./dist/config/index.js"
+    },
+    "#store/redis": {
+      "types": "./src/store/redis/index.ts",
+      "default": "./dist/store/redis/index.js"
+    },
+    "#store/*": {
+      "types": "./src/store/*",
+      "default": "./dist/store/*.js"
+    },
+    "#push/*": {
+      "types": "./src/push/*.ts",
+      "default": "./dist/push/*.js"
+    }
+  },
   "dependencies": {
     "@fastify/sensible": "^6.0.4",
     "dotenv": "^17.2.3",

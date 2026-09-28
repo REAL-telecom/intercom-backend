@@ -1,14 +1,14 @@
 import Fastify from "fastify";
 import sensible from "@fastify/sensible";
 import fs from "fs";
-import { env } from "./config";
-import { createDatabaseSchema, seedEndpointTemplates } from "./store/postgres";
+import { env } from "#config";
+import { createDatabaseSchema } from "#store/postgres";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerPushRoutes } from "./routes/push";
 import { registerCallRoutes } from "./routes/calls";
-import { websocket } from "./ari";
-import { cleanupStaleChannels } from "./calls/channels/watchdog";
-import { checkPendingOriginate } from "./calls/dial";
+import { websocket } from "#ari";
+import { cleanupStaleChannels } from "./calls/channels";
+import { checkPendingOriginate } from "./calls/dials";
 import { handleAriEvent } from "./calls/events/dispatcher";
 import { cancelAllEndpointRemovals, cleanupStaleEndpoints } from "./calls/endpoints";
 import { startOtpDialer } from "./otp/dialer";
@@ -69,9 +69,39 @@ const STALE_CHANNEL_CLEANUP_MS = 60_000;
  */
 const PENDING_ORIGINATE_CHECK_MS = 2_000;
 
-let isCleaningStaleEndpoints = false;
-let isCleaningStaleChannels = false;
-let isCheckingPendingOriginate = false;
+/**
+ * runExclusive — запускает повтор прохода с заданным интервалом.
+ * Следующий тик этого таймера не стартует, пока прошлый проход не закончился.
+ * Другие таймеры этот флаг не видят.
+ *
+ * @param task проход
+ * @param intervalMs интервал в миллисекундах
+ * @param skipMessage текст, если прошлый проход ещё идёт
+ * @param failMessage текст, если проход бросил ошибку
+ * @returns идентификатор таймера
+ */
+function runExclusive(
+  task: () => Promise<void>,
+  intervalMs: number,
+  skipMessage: string,
+  failMessage: string
+): ReturnType<typeof setInterval> {
+  let running = false;
+  return setInterval(() => {
+    if (running) {
+      app.log.debug(skipMessage);
+      return;
+    }
+    running = true;
+    task()
+      .catch((error) => {
+        app.log.error({ err: error }, failMessage);
+      })
+      .finally(() => {
+        running = false;
+      });
+  }, intervalMs);
+}
 
 /**
  * start — запускает сервер по порядку: база, маршруты, воркер, таймеры, ARI, приём запросов.
@@ -81,7 +111,6 @@ async function start(): Promise<void> {
   // База раньше остального: без таблиц маршруты и дворники падают на первом обращении.
   try {
     await createDatabaseSchema();
-    await seedEndpointTemplates();
   } catch (error) {
     app.log.error({ err: error }, "Failed to ensure database schema");
     process.exit(1);
@@ -102,51 +131,24 @@ async function start(): Promise<void> {
   });
 
   // Таймеры после базы. Опрос дозвона идёт раз в 2 секунды и читает Postgres.
-  const staleEndpointsTimer = setInterval(() => {
-    if (isCleaningStaleEndpoints) {
-      app.log.debug("Cleanup: skipping stale endpoints, previous pass still running");
-      return;
-    }
-    isCleaningStaleEndpoints = true;
-    cleanupStaleEndpoints(app)
-      .catch((error) => {
-        app.log.error({ err: error }, "Cleanup: failed to cleanup stale endpoints");
-      })
-      .finally(() => {
-        isCleaningStaleEndpoints = false;
-      });
-  }, STALE_ENDPOINT_CLEANUP_MS);
-
-  const overdueChannelsTimer = setInterval(() => {
-    if (isCleaningStaleChannels) {
-      app.log.debug("Cleanup: skipping overdue channels, previous pass still running");
-      return;
-    }
-    isCleaningStaleChannels = true;
-    cleanupStaleChannels(app)
-      .catch((error) => {
-        app.log.error({ err: error }, "Cleanup: failed to hang up overdue channels");
-      })
-      .finally(() => {
-        isCleaningStaleChannels = false;
-      });
-  }, STALE_CHANNEL_CLEANUP_MS);
-
-  // Опрос ожидающих дозвона: читает Postgres, зовёт checkPendingOriginate по каждой учётке телефона.
-  const pendingOriginateTimer = setInterval(() => {
-    if (isCheckingPendingOriginate) {
-      app.log.debug("Skipping pending originate check, previous pass still running");
-      return;
-    }
-    isCheckingPendingOriginate = true;
-    checkPendingOriginate(app)
-      .catch((error) => {
-        app.log.error({ err: error }, "Failed to check pending originate");
-      })
-      .finally(() => {
-        isCheckingPendingOriginate = false;
-      });
-  }, PENDING_ORIGINATE_CHECK_MS);
+  const staleEndpointsTimer = runExclusive(
+    () => cleanupStaleEndpoints(app),
+    STALE_ENDPOINT_CLEANUP_MS,
+    "Cleanup: skipping stale endpoints, previous pass still running",
+    "Cleanup: failed to cleanup stale endpoints"
+  );
+  const overdueChannelsTimer = runExclusive(
+    () => cleanupStaleChannels(app),
+    STALE_CHANNEL_CLEANUP_MS,
+    "Cleanup: skipping overdue channels, previous pass still running",
+    "Cleanup: failed to hang up overdue channels"
+  );
+  const pendingOriginateTimer = runExclusive(
+    () => checkPendingOriginate(app),
+    PENDING_ORIGINATE_CHECK_MS,
+    "Skipping pending originate check, previous pass still running",
+    "Failed to check pending originate"
+  );
 
   app.addHook("onClose", async () => {
     clearInterval(staleEndpointsTimer);

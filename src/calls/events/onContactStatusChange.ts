@@ -1,10 +1,10 @@
 import { FastifyInstance } from "fastify";
-import { dialPendingContacts } from "../dial";
+import { dialPendingContacts } from "../dials";
 import { removeEndpointIfNoContacts } from "../endpoints";
-import { readAppearedContactAor, readRemovedContactAor } from "../parsers";
-import { getEndpoint } from "../../store/redis";
+import { parseAppearedContactAor, parseRemovedContactAor } from "../parsers";
+import { getEndpoint } from "#store/redis";
 
-import type { Event } from "../../ari";
+import type { Event } from "#ari";
 
 async function isPhoneEndpoint(pjsipId: string): Promise<boolean> {
   const endpoint = await getEndpoint(pjsipId);
@@ -12,7 +12,7 @@ async function isPhoneEndpoint(pjsipId: string): Promise<boolean> {
 }
 
 export const onContactStatusChange = async (event: Event, app: FastifyInstance) => {
-  const appearedEndpointId = readAppearedContactAor(event);
+  const appearedEndpointId = parseAppearedContactAor(event);
   if (appearedEndpointId && (await isPhoneEndpoint(appearedEndpointId))) {
     try {
       await dialPendingContacts(appearedEndpointId, "event", app);
@@ -21,7 +21,7 @@ export const onContactStatusChange = async (event: Event, app: FastifyInstance) 
     }
     return;
   }
-  const removedEndpointId = readRemovedContactAor(event);
+  const removedEndpointId = parseRemovedContactAor(event);
   if (removedEndpointId && (await isPhoneEndpoint(removedEndpointId))) {
     try {
       await removeEndpointIfNoContacts(removedEndpointId, app);

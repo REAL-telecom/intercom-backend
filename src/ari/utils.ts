@@ -1,4 +1,4 @@
-import { env } from "../config";
+import { env } from "#config";
 
 /**
  * getBaseUrl — возвращает базовый URL REST ARI.

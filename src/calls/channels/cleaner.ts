@@ -1,32 +1,11 @@
 import { FastifyInstance } from "fastify";
-import { env } from "../../config";
-import { hangupChannel, listChannels } from "../../ari";
-import { getEndpoint } from "../../store/redis";
-
-const parseAriTimestamp = (value: string | undefined): number | null => {
-  if (typeof value !== "string" || value.length === 0) {
-    return null;
-  }
-  // Asterisk Date strings use +0000 / -0600; Date.parse needs a colon in the offset.
-  const normalized = value.replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
-  const ms = Date.parse(normalized);
-  return Number.isNaN(ms) ? null : ms;
-};
-
-function readPjsipId(name: string | undefined): string | null {
-  const namePart = name?.split("/")[1];
-  if (!namePart) {
-    return null;
-  }
-  const dash = namePart.lastIndexOf("-");
-  if (dash <= 0) {
-    return null;
-  }
-  return namePart.slice(0, dash);
-}
+import { env } from "#config";
+import { hangupChannel, listChannels } from "#ari";
+import { parseAriTimestamp, parsePjsipId } from "../parsers";
+import { getEndpoint } from "#store/redis";
 
 async function isPhoneChannel(name: string | undefined): Promise<boolean> {
-  const pjsipId = readPjsipId(name);
+  const pjsipId = parsePjsipId(name);
   if (!pjsipId) {
     return false;
   }

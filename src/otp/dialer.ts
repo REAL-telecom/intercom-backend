@@ -9,15 +9,15 @@
  */
 
 import { FastifyInstance } from "fastify";
-import { createChannelInDialplan } from "../ari";
+import { createChannelInDialplan } from "#ari";
 import { isClientBanned, logFail2banLine } from "../fail2ban";
-import { deleteOtp, getOtp } from "../store/redis/otp/codes";
+import { deleteOtp, getOtp } from "#store/redis/otp/codes";
 import {
   deleteOtpChannel,
   getOtpChannel,
   setOtpChannel,
   waitOtpCall,
-} from "../store/redis/otp/queue";
+} from "#store/redis/otp/queue";
 
 // Контекст диалплана, куда Asterisk отправляет звонок с OTP-кодом.
 const OTP_CONTEXT = "otp-out";

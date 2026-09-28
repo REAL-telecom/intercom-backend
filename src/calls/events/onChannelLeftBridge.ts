@@ -1,7 +1,7 @@
 import { FastifyInstance } from "fastify";
-import { cleanupBridge } from "../bridges/cleanup";
+import { cleanupBridge } from "../bridges";
 
-import type { Event } from "../../ari";
+import type { Event } from "#ari";
 
 export const onChannelLeftBridge = async (event: Event, app: FastifyInstance) => {
   const bridge = event.bridge as { id?: string; channels?: string[] };

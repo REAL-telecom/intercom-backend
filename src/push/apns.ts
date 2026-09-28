@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as http2 from "http2";
 import jwt from "jsonwebtoken";
-import { env } from "../config";
+import { env } from "#config";
 
 import type { ApnsCallEndedPayload, ApnsVoipCallPayload } from "../types";
 

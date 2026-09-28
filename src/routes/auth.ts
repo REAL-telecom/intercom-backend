@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { FastifyInstance } from "fastify";
 import { logFail2banLine } from "../fail2ban";
-import { getOrCreateUser } from "../store/postgres";
+import { getOrCreateUser } from "#store/postgres";
 import {
   blockOtpRequestByIp,
   blockOtpVerifyByIp,
@@ -24,7 +24,7 @@ import {
   resetOtpRequestCounterByPhoneTTL,
   resetOtpVerifyCounterByPhoneTTL,
   setOtp,
-} from "../store/redis";
+} from "#store/redis";
 
 const AUTH_REQUESTS_LIMIT_ATTEMPTS = 10;
 

@@ -13,6 +13,12 @@
     "exactOptionalPropertyTypes": true,
     "strict": true,
     "moduleResolution": "node16",
+    "paths": {
+      "#ari": ["./src/ari/index.ts"],
+      "#config": ["./src/config/index.ts"],
+      "#store/*": ["./src/store/*"],
+      "#push/*": ["./src/push/*"]
+    },
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "skipLibCheck": true

@@ -8,7 +8,7 @@
  */
 
 import Redis from "ioredis";
-import { env } from "../../config";
+import { env } from "#config";
 
 /**
  * createRedis — возвращает клиент Redis с параметрами из конфигурации.

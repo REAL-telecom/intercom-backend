@@ -9,13 +9,10 @@
  *  - `ps_auths` — учётные данные SIP-аккаунта, логин и пароль
  *  - `ps_endpoints` — сама оконечная точка: контекст, кодеки, медиа-настройки
  * Pool — пул соединений с Postgres. Открывает сразу несколько соединений и раздаёт их запросам по мере надобности.
- * Шаблон эндпоинта — строка в `ps_endpoints`: `tpl_panel` и `tpl_client`.
- * Учётка телефона при создании поле `templates` не получает, поэтому от этих строк не наследуется.
- * `tpl_client` записывается при старте, других обращений к ней в коде нет.
  */
 
 import { Pool } from "pg";
-import { env } from "../config";
+import { env } from "#config";
 
 import type { PushPlatform, PushTokenRecord } from "../types";
 
@@ -123,7 +120,6 @@ export async function createDatabaseSchema() {
       allow TEXT,
       -- задел под голосовую почту: имя ящика для индикатора сообщений на устройстве
       mailboxes TEXT,
-      templates TEXT,
       direct_media TEXT,
       force_rport TEXT,
       rewrite_contact TEXT,
@@ -491,37 +487,4 @@ export async function listPhoneEndpoints(): Promise<string[]> {
     `SELECT id FROM ps_endpoints WHERE context = 'phone'`
   );
   return result.rows.map((row: { id: string }) => row.id);
-}
-
-// ─── Шаблоны эндпоинтов ─────────────────────────────────────────────
-
-/**
- * seedEndpointTemplates — заполняет `ps_endpoints` строками `tpl_panel` и `tpl_client`.
- * Повторный вызов обновляет поле `allow`, остальные поля не трогает.
- * Строки описывают кодеки, транспорт и медиа-настройки.
- * `createEndpoint` поле `templates` не передаёт, поэтому учётка телефона от них не наследуется.
- * `tpl_client` записывается здесь и больше нигде не читается.
- * Вызывается один раз при старте после `createDatabaseSchema`.
- */
-export async function seedEndpointTemplates() {
-  await pool.query(
-    `
-    INSERT INTO ps_endpoints (
-      id, transport, disallow, allow, direct_media, force_rport, rewrite_contact, rtp_symmetric
-    ) VALUES (
-      'tpl_panel', 'transport-udp', 'all', 'ulaw,alaw,h264', 'no', 'yes', 'yes', 'yes'
-    )
-    ON CONFLICT (id) DO UPDATE SET allow = EXCLUDED.allow;
-    `
-  );
-  await pool.query(
-    `
-    INSERT INTO ps_endpoints (
-      id, transport, disallow, allow, direct_media, force_rport, rewrite_contact, rtp_symmetric
-    ) VALUES (
-      'tpl_client', 'transport-udp', 'all', 'ulaw,alaw,h264', 'no', 'yes', 'yes', 'yes'
-    )
-    ON CONFLICT (id) DO UPDATE SET allow = EXCLUDED.allow;
-    `
-  );
 }

@@ -1,11 +1,12 @@
 import { FastifyInstance } from "fastify";
-import { continueInDialplan, hangupChannel } from "../../../ari";
+import { continueInDialplan, hangupChannel } from "#ari";
+import { parsePjsipId } from "../../parsers";
 import {
   formatAddress,
   getAddress,
   getPanel as getPanelRecord,
   getUser,
-} from "../../../store/postgres";
+} from "#store/postgres";
 
 export type PanelCall = {
   panelId: string | null;
@@ -33,9 +34,7 @@ export async function readPanel(
   callId: string,
   app: FastifyInstance
 ): Promise<PanelCall | null> {
-  // PJSIP channel name is like "PJSIP/endpoint_id-<uniq>"; extract endpoint_id for the panel lock
-  const namePart = channel.name?.split("/")[1];
-  const panelId = namePart?.split("-")[0] ?? null;
+  const panelId = parsePjsipId(channel.name);
   const panelIpFromArgs = typeof eventArgs[1] === "string" ? eventArgs[1].trim() : "";
   const apartmentFromArgs = typeof eventArgs[2] === "string" ? eventArgs[2].trim() : "";
   const apartment = /^\d+$/.test(apartmentFromArgs) ? apartmentFromArgs : null;

@@ -1,16 +1,16 @@
 import { FastifyInstance } from "fastify";
-import { env } from "../../config";
-import { finishCall } from "../endpoints";
-import { notifyCallOver } from "../../push/notifyCallOver";
+import { env } from "#config";
+import { finishCall } from "../utils";
+import { notifyCallOver } from "#push/notifyCallOver";
 import {
   getCall,
   getChannel,
   getDialStatus,
   setDialStatus,
   type Call,
-} from "../../store/redis";
+} from "#store/redis";
 
-import type { Event } from "../../ari";
+import type { Event } from "#ari";
 
 export const onStasisEnd = async (event: Event, app: FastifyInstance) => {
   const channel = event.channel as { id?: string };

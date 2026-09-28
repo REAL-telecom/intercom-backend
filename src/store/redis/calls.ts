@@ -18,7 +18,7 @@
  *  - `canceled` — панель сбросила, пока звонило,
  *  - `timedOut` — никто не ответил за окно дозвона.
  * Отсутствие ключа означает, что дозвон продолжается.
- * Ячейка `endpoint:${pjsipId}` — запись в Redis.
+ * Ячейка `endpoint:${endpointId}` — запись в Redis.
  * Значение — идентификатор звонка и тип.
  * Тип `panel` — замок одного входящего с панели. Панель либо в звонке, либо нет. Ячейка стоит на время входящего, чтобы второй одновременный вызов с той же панели был отклонён.
  * Тип `phone` — сторож дворника для учётки телефона.
@@ -32,7 +32,7 @@
  * Канал звонка — ключ `channel:${channelId}`.
  * Связывает ARI-канал со звонком для уборки по событию `StasisEnd`.
  * В записи идентификатор звонка. Пишется на каждый канал, который участвует в звонке: отдельно для канала панели, отдельно для канала-ноги дозвона.
- * Заявка на дозвон — ключ `originate:${pjsipId}`.
+ * Заявка на дозвон — ключ `originate:${endpointId}`.
  * Мост и канал панели. Дозвон уходит, когда у учётки телефона появляется контакт.
  * Уборка моста — ключ `bridge_cleanup:${bridgeId}`.
  * Отметка, что мост уже взят в уборку. Повторный захват не проходит.
@@ -307,21 +307,21 @@ type Endpoint = {
  * setEndpoint — сохраняет ячейку `endpoint:` с TTL.
  * При `nx` существующая ячейка не перезаписывается. Так ставится замок панели: второй вызов с тем же идентификатором ячейку не затирает.
  *
- * @param pjsipId идентификатор объекта PJSIP
+ * @param endpointId идентификатор учётки для ключа ячейки
  * @param payload ссылка на звонок и тип ячейки
  * @param ttlSec время жизни в секундах
- * @param nx не перезаписывать существующий ключ
+ * @param options при `nx` существующая ячейка не перезаписывается
  * @returns истина, если запись поставил этот вызов
  */
 export async function setEndpoint(
-  pjsipId: string,
+  endpointId: string,
   payload: Endpoint,
   ttlSec: number,
-  nx = false
+  options?: { nx?: boolean }
 ): Promise<boolean> {
-  const key = `endpoint:${pjsipId}`;
+  const key = `endpoint:${endpointId}`;
   const stored = JSON.stringify(payload);
-  const result = nx
+  const result = options?.nx
     ? await redisClient.set(key, stored, "EX", ttlSec, "NX")
     : await redisClient.set(key, stored, "EX", ttlSec);
   return result === "OK";
@@ -330,11 +330,11 @@ export async function setEndpoint(
 /**
  * getEndpoint — возвращает ячейку `endpoint:`.
  *
- * @param pjsipId идентификатор объекта PJSIP
+ * @param endpointId идентификатор учётки для ключа ячейки
  * @returns запись или `null`, если её нет, истёк срок или форма записи не опознана
  */
-export async function getEndpoint(pjsipId: string): Promise<Endpoint | null> {
-  const key = `endpoint:${pjsipId}`;
+export async function getEndpoint(endpointId: string): Promise<Endpoint | null> {
+  const key = `endpoint:${endpointId}`;
   const value = await redisClient.get(key);
   if (!value) {
     return null;
@@ -353,13 +353,13 @@ export async function getEndpoint(pjsipId: string): Promise<Endpoint | null> {
  * releaseEndpoint — освобождает ячейку `endpoint:`, если её держит этот звонок.
  * Ячейка с другим звонком остаётся.
  *
- * @param pjsipId идентификатор объекта PJSIP
+ * @param endpointId идентификатор учётки для ключа ячейки
  * @param callId идентификатор звонка, который держит ячейку
  */
-export async function releaseEndpoint(pjsipId: string, callId: string): Promise<void> {
-  const endpoint = await getEndpoint(pjsipId);
+export async function releaseEndpoint(endpointId: string, callId: string): Promise<void> {
+  const endpoint = await getEndpoint(endpointId);
   if (endpoint?.callId === callId) {
-    await deleteEndpoint(pjsipId);
+    await deleteEndpoint(endpointId);
   }
 }
 
@@ -367,10 +367,10 @@ export async function releaseEndpoint(pjsipId: string, callId: string): Promise<
  * deleteEndpoint — удаляет ячейку `endpoint:` в Redis.
  * Строку PJSIP в Asterisk не трогает.
  *
- * @param pjsipId идентификатор объекта PJSIP
+ * @param endpointId идентификатор учётки для ключа ячейки
  */
-async function deleteEndpoint(pjsipId: string): Promise<void> {
-  const key = `endpoint:${pjsipId}`;
+async function deleteEndpoint(endpointId: string): Promise<void> {
+  const key = `endpoint:${endpointId}`;
   await redisClient.del(key);
 }
 

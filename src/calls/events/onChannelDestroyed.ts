@@ -1,8 +1,8 @@
 import { FastifyInstance } from "fastify";
 import { cleanupOtpChannel } from "../../otp/dialer";
-import { deleteOriginate, getCall, getChannel } from "../../store/redis";
+import { deleteOriginate, getCall, getChannel } from "#store/redis";
 
-import type { Event } from "../../ari";
+import type { Event } from "#ari";
 
 export const onChannelDestroyed = async (event: Event, app: FastifyInstance) => {
   const channel = event.channel as { id?: string };

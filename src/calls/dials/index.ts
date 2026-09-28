@@ -1,5 +1,5 @@
 import { FastifyInstance } from "fastify";
-import { env } from "../config";
+import { env } from "#config";
 import {
   getChannel,
   getChannelVariable,
@@ -7,9 +7,9 @@ import {
   createChannelInStasis,
   AriRequestError,
   AriTransportError,
-} from "../ari";
-import { parseDialContacts } from "./parsers";
-import { listPhoneEndpoints } from "../store/postgres";
+} from "#ari";
+import { parseDialContacts } from "../parsers";
+import { listPhoneEndpoints } from "#store/postgres";
 import {
   addDialedChannel,
   addDialedContact,
@@ -20,7 +20,7 @@ import {
   getOriginate,
   listDialedChannels,
   removeDialedContact,
-} from "../store/redis";
+} from "#store/redis";
 
 export type DialPendingSource = "event" | "poll";
 

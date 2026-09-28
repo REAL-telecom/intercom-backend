@@ -1,18 +1,19 @@
 import crypto from "crypto";
 import { FastifyInstance } from "fastify";
-import { env } from "../../../config";
+import { env } from "#config";
 import {
   addChannelToBridge,
   createBridge,
   createEndpoint,
   hangupChannel,
-} from "../../../ari";
-import { cleanupBridge } from "../../bridges/cleanup";
-import { finishCall, removeTemporarySipEndpoint } from "../../endpoints";
-import { sendApnsVoipPush } from "../../../push/apns";
-import { sendFcmPush } from "../../../push/fcm";
-import { callOutcomeToEndedReason, notifyCallOver } from "../../../push/notifyCallOver";
-import { listPushTokens, removePushTokens } from "../../../store/postgres";
+} from "#ari";
+import { cleanupBridge } from "../../bridges";
+import { deletePhoneEndpoint } from "../../endpoints";
+import { finishCall } from "../../utils";
+import { sendApnsVoipPush } from "#push/apns";
+import { sendFcmPush } from "#push/fcm";
+import { callOutcomeToEndedReason, notifyCallOver } from "#push/notifyCallOver";
+import { listPushTokens, removePushTokens } from "#store/postgres";
 import {
   clearCall,
   getCall,
@@ -24,11 +25,11 @@ import {
   setDialStatus,
   setEndpoint,
   setOriginate,
-} from "../../../store/redis";
+} from "#store/redis";
 import { onPhoneStasisStart } from "./phone";
 import { readPanel, type PanelCall } from "./panel";
 
-import type { Event } from "../../../ari";
+import type { Event } from "#ari";
 
 const INCOMING_MAX_CONTACTS = 8;
 
@@ -39,7 +40,7 @@ async function assembleIncomingCall(
   app: FastifyInstance
 ): Promise<void> {
   const { panelId, userId, apartment, address } = panelCall;
-  const phoneId = callId;
+  const phoneId = crypto.randomUUID();
   const sipUsername = phoneId;
   const sipPassword = crypto.randomBytes(8).toString("hex");
   await setCall(
@@ -60,7 +61,7 @@ async function assembleIncomingCall(
       panelId,
       { callId, type: "panel" },
       env.callTokenTtlSec,
-      true
+      { nx: true }
     );
     if (!claimed) {
       const existing = await getEndpoint(panelId);
@@ -139,7 +140,7 @@ async function assembleIncomingCall(
         app.log
       );
     }
-    await removeTemporarySipEndpoint(phoneId, { callId, channelId, source: "setupFailed" }, app);
+    await deletePhoneEndpoint(phoneId, { callId, channelId, source: "setupFailed" }, app);
     await hangupChannel(channelId, app.log);
   }
 

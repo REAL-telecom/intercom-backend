@@ -5,7 +5,7 @@ import { onContactStatusChange } from "./onContactStatusChange";
 import { onStasisEnd } from "./onStasisEnd";
 import { onStasisStart } from "./onStasisStart";
 
-import type { Event } from "../../ari";
+import type { Event } from "#ari";
 
 /**
  * Обрабатывает событие ARI.

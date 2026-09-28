@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as admin from "firebase-admin";
-import { env } from "../config";
+import { env } from "#config";
 
 import type { FcmCallEndedPayload, FcmCallPayload } from "../types";
 

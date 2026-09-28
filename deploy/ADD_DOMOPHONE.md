@@ -25,7 +25,7 @@ docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "I
 **Endpoint**
 
 ```bash
-docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "INSERT INTO ps_endpoints (id, transport, aors, auth, context, templates, disallow, allow, direct_media, force_rport, rewrite_contact, rtp_symmetric) VALUES ('${TEST_PANEL_PJSIP_ID}','transport-udp','${TEST_PANEL_PJSIP_ID}','${TEST_PANEL_PJSIP_ID}','panel','tpl_panel','all','ulaw,alaw,h264','no','yes','yes','yes') ON CONFLICT (id) DO UPDATE SET context = EXCLUDED.context, templates = EXCLUDED.templates, allow = EXCLUDED.allow;"
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "INSERT INTO ps_endpoints (id, transport, aors, auth, context, disallow, allow, direct_media, force_rport, rewrite_contact, rtp_symmetric, ice_support) VALUES ('${TEST_PANEL_PJSIP_ID}','transport-udp','${TEST_PANEL_PJSIP_ID}','${TEST_PANEL_PJSIP_ID}','panel','all','ulaw,alaw,h264','no','yes','yes','yes','yes') ON CONFLICT (id) DO UPDATE SET context = EXCLUDED.context, transport = EXCLUDED.transport, disallow = EXCLUDED.disallow, allow = EXCLUDED.allow, direct_media = EXCLUDED.direct_media, force_rport = EXCLUDED.force_rport, rewrite_contact = EXCLUDED.rewrite_contact, rtp_symmetric = EXCLUDED.rtp_symmetric, ice_support = EXCLUDED.ice_support;"
 ```
 ### 3) Проверить данные в Postgres
 

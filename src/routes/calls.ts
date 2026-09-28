@@ -1,11 +1,11 @@
 import { FastifyInstance } from "fastify";
-import { env } from "../config";
+import { env } from "#config";
 import {
   getCall,
   setDialStatus,
-} from "../store/redis";
-import { finishCall } from "../calls/endpoints";
-import { notifyCallOver } from "../push/notifyCallOver";
+} from "#store/redis";
+import { finishCall } from "../calls/utils";
+import { notifyCallOver } from "#push/notifyCallOver";
 
 /**
  * Регистрирует маршруты звонка: завершение активного входящего

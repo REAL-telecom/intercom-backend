@@ -1,5 +1,5 @@
 import { FastifyInstance } from "fastify";
-import { savePushToken } from "../store/postgres";
+import { savePushToken } from "#store/postgres";
 
 import type { RegisterBody } from "../types";
 

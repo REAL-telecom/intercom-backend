@@ -10,7 +10,7 @@
  * Up — состояние канала: разговор идёт, участники соединены.
  */
 
-import { env } from "../config";
+import { env } from "#config";
 import { AriRequestError, request } from "./request";
 
 import type { FastifyBaseLogger } from "fastify";

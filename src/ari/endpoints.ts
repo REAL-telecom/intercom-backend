@@ -4,7 +4,7 @@
  * Endpoint — объект ARI. Описывает конечное SIP-устройство, которое вызывают по имени.
  */
 
-import { env } from "../config";
+import { env } from "#config";
 import { AriRequestError, formatRequestError, request } from "./request";
 
 /**
