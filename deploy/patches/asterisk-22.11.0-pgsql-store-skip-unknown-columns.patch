@@ -1,0 +1,87 @@
+--- a/res/res_config_pgsql.c
++++ b/res/res_config_pgsql.c
+@@ -975,7 +975,9 @@
+ 	struct ast_str *sql1 = ast_str_thread_get(&sql_buf, 256);
+ 	struct ast_str *sql2 = ast_str_thread_get(&where_buf, 256);
+ 	int pgresult;
+-	const struct ast_variable *field = fields;
++	int first = 1;
++	const struct ast_variable *field;
++	struct tables *dbtable;
+ 
+ 	/*
+ 	 * Ignore database from the extconfig.conf since it was
+@@ -985,6 +987,11 @@
+ 
+ 	if (!table) {
+ 		ast_log(LOG_WARNING, "PostgreSQL RealTime: No table specified.\n");
++		return -1;
++	}
++
++	if (!(dbtable = find_table(database, table))) {
++		ast_log(LOG_ERROR, "Table '%s' does not exist!!\n", table);
+ 		return -1;
+ 	}
+ 
+@@ -995,11 +1002,12 @@
+ 	ast_mutex_lock(&pgsql_lock);
+ 	if (!pgsql_reconnect(database)) {
+ 		ast_mutex_unlock(&pgsql_lock);
++		release_table(dbtable);
+ 		return -1;
+ 	}
+ 
+ 	/* Get the first parameter and first value in our list of passed paramater/value pairs */
+-	if (!field) {
++	if (!fields) {
+ 		ast_log(LOG_WARNING,
+ 				"PostgreSQL RealTime: Realtime storage requires at least 1 parameter and 1 value to store.\n");
+ 		if (pgsqlConn) {
+@@ -1007,21 +1015,37 @@
+ 			pgsqlConn = NULL;
+ 		}
+ 		ast_mutex_unlock(&pgsql_lock);
++		release_table(dbtable);
+ 		return -1;
+ 	}
+ 
+-	/* Create the first part of the query using the first parameter/value pairs we just extracted
+-	   If there is only 1 set, then we have our query. Otherwise, loop thru the list and concat */
+-	ESCAPE_STRING(buf, field->name);
+-	ast_str_set(&sql1, 0, "INSERT INTO %s (%s", table, ast_str_buffer(buf));
+-	ESCAPE_STRING(buf, field->value);
+-	ast_str_set(&sql2, 0, ") VALUES ('%s'", ast_str_buffer(buf));
+-	while ((field = field->next)) {
+-		ESCAPE_STRING(buf, field->name);
+-		ast_str_append(&sql1, 0, ", %s", ast_str_buffer(buf));
++	/* Insert only columns that exist. An unquoted name such as 100rel is invalid SQL. */
++	for (field = fields; field; field = field->next) {
++		if (!find_column(dbtable, field->name)) {
++			ast_debug(1, "PostgreSQL RealTime: Skipping column '%s' in table '%s': column does not exist\n", field->name, table);
++			continue;
++		}
++
++		ESCAPE_STRING(buf, field->name);
++		if (first) {
++			ast_str_set(&sql1, 0, "INSERT INTO %s (%s", table, ast_str_buffer(buf));
++		} else {
++			ast_str_append(&sql1, 0, ", %s", ast_str_buffer(buf));
++		}
+ 		ESCAPE_STRING(buf, field->value);
+-		ast_str_append(&sql2, 0, ", '%s'", ast_str_buffer(buf));
++		if (first) {
++			ast_str_set(&sql2, 0, ") VALUES ('%s'", ast_str_buffer(buf));
++			first = 0;
++		} else {
++			ast_str_append(&sql2, 0, ", '%s'", ast_str_buffer(buf));
++		}
+ 	}
++	release_table(dbtable);
++	if (first) {
++		ast_log(LOG_WARNING, "PostgreSQL RealTime: No columns to store in table '%s'\n", table);
++		ast_mutex_unlock(&pgsql_lock);
++		return -1;
++	}
+ 	ast_str_append(&sql1, 0, "%s)", ast_str_buffer(sql2));
+ 
+ 	ast_debug(1, "PostgreSQL RealTime: Insert SQL: %s\n", ast_str_buffer(sql1));

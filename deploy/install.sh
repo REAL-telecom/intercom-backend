@@ -264,6 +264,7 @@ run_with_spinner "Распаковка дистрибутива" "tar xvf ${ASTE
 cd "asterisk-${ASTERISK_VERSION}"
 wait_for_apt_idle
 run_with_spinner "Установка зависимостей" "./contrib/scripts/install_prereq install"
+run_with_spinner "Патч драйвера PostgreSQL" "patch -p1 < \"${ROOT_DIR}/deploy/patches/asterisk-22.11.0-pgsql-store-skip-unknown-columns.patch\""
 run_with_spinner "Конфигурирование компонентов" "./configure --with-jansson-bundled"
 run_with_spinner "Подключение компонентов" "make menuselect/menuselect && make menuselect-tree && ./menuselect/menuselect --enable codec_opus --enable res_config_pgsql --disable CORE-SOUNDS-EN-GSM --enable CORE-SOUNDS-EN-WAV --enable CORE-SOUNDS-RU-WAV --enable MOH-OPSOUND-WAV"
 run_with_spinner "Сборка и установка программы" "make -j \"\$(nproc)\" && make install"

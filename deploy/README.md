@@ -22,6 +22,8 @@
 
 ## Прочее
 
+Патч [patches/asterisk-22.11.0-pgsql-store-skip-unknown-columns.patch](patches/asterisk-22.11.0-pgsql-store-skip-unknown-columns.patch) учит драйвер PostgreSQL при вставке пропускать колонки, которых нет в таблице. Имя `100rel` без кавычек иначе ломает создание временной учётки. Свежий [install.sh](install.sh) накладывает патч до сборки. На уже собранном Asterisk шаги в [PATCH_PGSQL_STORE.md](PATCH_PGSQL_STORE.md).
+
 - **[DOMAIN_MIGRATION.md](DOMAIN_MIGRATION.md)** — смена домена на уже развёрнутом сервере (серт, `.env`, Asterisk/TURN, клиенты). Шаблоны с `__SERVER_DOMAIN__` не трогать.
 - **[TEST_BLOCKING_E2E.md](TEST_BLOCKING_E2E.md)** — ручное тестирование rate limits и fail2ban. Не является обязательной частью настройки.
 

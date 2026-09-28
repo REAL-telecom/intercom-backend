@@ -100,18 +100,7 @@ export async function createDatabaseSchema() {
       max_contacts INTEGER,
       contact TEXT,
       default_expiration INTEGER,
-      maximum_expiration INTEGER,
-      minimum_expiration INTEGER,
-      qualify_frequency INTEGER,
-      qualify_timeout DOUBLE PRECISION,
-      qualify_2xx_only TEXT,
-      authenticate_qualify TEXT,
-      remove_existing TEXT,
-      remove_unavailable TEXT,
-      support_path TEXT,
-      mailboxes TEXT,
-      voicemail_extension TEXT,
-      outbound_proxy TEXT
+      maximum_expiration INTEGER
     );
   `);
   await pool.query(`
@@ -120,15 +109,7 @@ export async function createDatabaseSchema() {
       auth_type TEXT,
       username TEXT,
       password TEXT,
-      realm TEXT,
-      md5_cred TEXT,
-      password_digest TEXT,
-      nonce_lifetime INTEGER,
-      supported_algorithms_uac TEXT,
-      supported_algorithms_uas TEXT,
-      refresh_token TEXT,
-      oauth_clientid TEXT,
-      oauth_secret TEXT
+      realm TEXT
     );
   `);
   await pool.query(`
@@ -140,6 +121,7 @@ export async function createDatabaseSchema() {
       context TEXT,
       disallow TEXT,
       allow TEXT,
+      -- задел под голосовую почту: имя ящика для индикатора сообщений на устройстве
       mailboxes TEXT,
       templates TEXT,
       direct_media TEXT,
@@ -158,18 +140,14 @@ export async function createDatabaseSchema() {
       id TEXT PRIMARY KEY,
       auth_rejection_permanent TEXT,
       client_uri TEXT,
-      contact_user TEXT,
       expiration INTEGER,
       fatal_retry_interval INTEGER,
       forbidden_retry_interval INTEGER,
       max_retries INTEGER,
       outbound_auth TEXT,
-      outbound_proxy TEXT,
       retry_interval INTEGER,
       server_uri TEXT,
-      transport TEXT,
-      support_path TEXT,
-      support_outbound_authentication TEXT
+      transport TEXT
     );
   `);
   await pool.query(`
