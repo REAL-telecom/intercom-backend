@@ -270,6 +270,7 @@ export const onStasisStart = async (event: Event, app: FastifyInstance) => {
   const channel = event.channel as {
     id?: string;
     name?: string;
+    protocol_id?: string;
     caller?: { number?: string; name?: string };
   };
   if (!channel.id) {
@@ -288,7 +289,13 @@ export const onStasisStart = async (event: Event, app: FastifyInstance) => {
     // Do not answer immediately - we will answer after the client channel answers
     // This is needed for proper connection setup
     app.log.info({ channelId }, "Incoming panel channel received, will answer after client connects");
-    const callId = crypto.randomUUID();
+    // Id звонка — Call-ID приглашения панели. Свой UUID для звонка не генерируется.
+    const callId = typeof channel.protocol_id === "string" ? channel.protocol_id.trim() : "";
+    if (!callId) {
+      app.log.warn({ channelId, channel }, "Panel channel has no protocol_id");
+      await hangupChannel(channelId, app.log);
+      return;
+    }
     try {
       const panelCall = await readPanel(channel, channelId, eventArgs, callId, app);
       if (!panelCall) {

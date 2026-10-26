@@ -83,7 +83,7 @@ export const dialPendingContacts = async (endpointId: string, source: DialPendin
       return;
     }
 
-    const appArgs = `phone,${pending.bridgeId},${pendingCallId}`;
+    const appArgs = `phone,${pending.bridgeId}`;
     for (const dialContact of dialContacts) {
       if ((await getDialStatus(pendingCallId)) !== null) {
         break;

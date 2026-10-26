@@ -7,10 +7,12 @@ import {
   hangupChannel,
 } from "#ari";
 import { finishCall } from "../../utils";
+import { parsePjsipId } from "../../parsers";
 import { notifyCallOver } from "#push/notifyCallOver";
 import {
   getCall,
   getDialStatus,
+  getEndpoint,
   listDialedChannels,
   setChannel,
   setDialStatus,
@@ -81,7 +83,10 @@ export const onPhoneStasisStart = async (
   app: FastifyInstance
 ) => {
   const bridgeId = String(eventArgs[1] ?? "");
-  const callIdForStatus = String(eventArgs[2] ?? "") || null;
+  const channelName = (event.channel as { name?: string } | undefined)?.name;
+  const phoneId = parsePjsipId(channelName);
+  const phoneEndpoint = phoneId ? await getEndpoint(phoneId) : null;
+  const callIdForStatus = phoneEndpoint?.type === "phone" ? phoneEndpoint.callId : null;
   if (bridgeId) {
     if (callIdForStatus) {
       const claimed = await setDialStatus(callIdForStatus, "accepted", env.callTokenTtlSec);
@@ -111,7 +116,7 @@ export const onPhoneStasisStart = async (
     } else {
       app.log.warn(
         { channelId, args: event.args },
-        "Could not derive callId from phone channel args, skipping outcome claim"
+        "Could not derive callId from phone endpoint, skipping outcome claim"
       );
     }
     let connected = false;
