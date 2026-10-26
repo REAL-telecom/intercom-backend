@@ -82,7 +82,7 @@ async function assembleIncomingCall(
   }
   await setEndpoint(phoneId, { callId, type: "phone" }, env.callTokenTtlSec);
 
-  // bridgeId is set only after full setup so ring push and ring timeout never run on a failed room.
+  // Локальный bridgeId задаётся в конце сборки: пуш и таймаут не стартуют, если комната не собралась.
   let bridgeId: string | undefined;
   let createdBridgeId: string | undefined;
   try {
@@ -96,7 +96,14 @@ async function assembleIncomingCall(
     });
     app.log.info({ phoneId }, "Temporary SIP endpoint created");
     app.log.info({ callId, channelId, phoneId }, "STEP 1: Creating bridge and setting up originate");
-    const bridge = await createBridge();
+    const newBridgeId = crypto.randomUUID();
+    const callRecord = await getCall(callId);
+    if (!callRecord) {
+      throw new Error("Call record missing before bridge update");
+    }
+    // Id моста пишется в запись звонка до создания моста: сторож не видит мост без звонка.
+    await setCall({ ...callRecord, bridgeId: newBridgeId }, env.callTokenTtlSec);
+    const bridge = await createBridge(newBridgeId);
     createdBridgeId = bridge.id;
     app.log.info({ bridgeId: bridge.id, channelId }, "STEP 2: Bridge created, adding incoming panel channel");
     await new Promise((r) => setTimeout(r, 300));

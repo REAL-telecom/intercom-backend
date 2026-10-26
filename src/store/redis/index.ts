@@ -3,6 +3,7 @@ export { redisClient } from "./client";
 export {
   setCall,
   getCall,
+  listCalls,
   setDialStatus,
   getDialStatus,
   addDialedChannel,

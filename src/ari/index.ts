@@ -20,5 +20,5 @@ export {
   continueInDialplan,
   hangupChannel,
 } from "./channels";
-export { addChannelToBridge, createBridge, deleteBridge, getBridge } from "./bridges";
+export { addChannelToBridge, createBridge, deleteBridge, getBridge, listBridges } from "./bridges";
 export { createEndpoint, deleteEndpoint } from "./endpoints";

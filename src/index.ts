@@ -7,6 +7,7 @@ import { registerAuthRoutes } from "./routes/auth";
 import { registerPushRoutes } from "./routes/push";
 import { registerCallRoutes } from "./routes/calls";
 import { websocket } from "#ari";
+import { cleanupStaleBridges } from "./calls/bridges";
 import { cleanupStaleChannels } from "./calls/channels";
 import { checkPendingOriginate } from "./calls/dials";
 import { handleAriEvent } from "./calls/events/dispatcher";
@@ -63,6 +64,12 @@ const STALE_ENDPOINT_CLEANUP_MS = 10 * 60 * 1000;
  * STALE_CHANNEL_CLEANUP_MS — задаёт интервал проверки просроченных каналов.
  */
 const STALE_CHANNEL_CLEANUP_MS = 60_000;
+
+/**
+ * STALE_BRIDGE_CLEANUP_MS — задаёт интервал снятия мостов без записи звонка.
+ * После событийного снятия он страховка, не основной уборщик.
+ */
+const STALE_BRIDGE_CLEANUP_MS = 10 * 60 * 1000;
 
 /**
  * PENDING_ORIGINATE_CHECK_MS — задаёт интервал опроса ожидающих дозвона.
@@ -143,6 +150,12 @@ async function start(): Promise<void> {
     "Cleanup: skipping overdue channels, previous pass still running",
     "Cleanup: failed to hang up overdue channels"
   );
+  const staleBridgesTimer = runExclusive(
+    () => cleanupStaleBridges(app),
+    STALE_BRIDGE_CLEANUP_MS,
+    "Cleanup: skipping empty bridges, previous pass still running",
+    "Cleanup: failed to delete empty bridges"
+  );
   const pendingOriginateTimer = runExclusive(
     () => checkPendingOriginate(app),
     PENDING_ORIGINATE_CHECK_MS,
@@ -153,6 +166,7 @@ async function start(): Promise<void> {
   app.addHook("onClose", async () => {
     clearInterval(staleEndpointsTimer);
     clearInterval(overdueChannelsTimer);
+    clearInterval(staleBridgesTimer);
     clearInterval(pendingOriginateTimer);
     cancelAllEndpointRemovals();
   });

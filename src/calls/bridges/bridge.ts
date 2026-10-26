@@ -58,9 +58,9 @@ export async function cleanupBridge(
     }
   } catch (error) {
     if (error instanceof AriRequestError && error.status === 404) {
-      logger.debug({ err: error, bridgeId, ...context }, `${context.source}: bridge already deleted or cleanup failed`);
+      logger.debug({ err: error, bridgeId, ...context }, `${context.source}: bridge already deleted`);
     } else {
-      logger.warn({ err: error, bridgeId, ...context }, `${context.source}: bridge already deleted or cleanup failed`);
+      logger.warn({ err: error, bridgeId, ...context }, `${context.source}: bridge cleanup failed`);
     }
   }
 }

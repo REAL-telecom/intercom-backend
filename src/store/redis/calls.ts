@@ -97,6 +97,35 @@ export async function getCall(callId: string): Promise<Call | null> {
 }
 
 /**
+ * listCalls — возвращает записи звонков, которые ещё лежат в Redis.
+ *
+ * @returns записи звонков
+ */
+export async function listCalls(): Promise<Call[]> {
+  const keys = new Set<string>();
+  let cursor = "0";
+  do {
+    const [next, batch] = await redisClient.scan(cursor, "MATCH", "call:*", "COUNT", 100);
+    cursor = next;
+    for (const key of batch) {
+      keys.add(key);
+    }
+  } while (cursor !== "0");
+  if (keys.size === 0) {
+    return [];
+  }
+  const values = await redisClient.mget(...keys);
+  const calls: Call[] = [];
+  for (const value of values) {
+    if (!value) {
+      continue;
+    }
+    calls.push(JSON.parse(value) as Call);
+  }
+  return calls;
+}
+
+/**
  * clearCall — очищает данные звонка целиком одним действием.
  * Удаляет разом ключи данных, результата вызова, контактов, каналов, ячейки учетной записи телефона и заявки на дозвон.
  * Замок панели снимает `releaseEndpoint`.

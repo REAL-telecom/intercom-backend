@@ -19,11 +19,14 @@ type Bridge = {
 
 /**
  * createBridge — создаёт mixing-мост с видео.
+ * Id задаёт вызывающий код.
  *
+ * @param bridgeId идентификатор моста
  * @returns объект с идентификатором моста
  */
-export async function createBridge() {
-  return request<Bridge>("/bridges", "POST", {
+export async function createBridge(bridgeId: string) {
+  const params = new URLSearchParams({ bridgeId });
+  return request<Bridge>(`/bridges?${params.toString()}`, "POST", {
     type: "mixing",
     videoMode: "talker", // Включить видео в мосту
   });
@@ -55,6 +58,17 @@ export async function getBridge(bridgeId: string) {
   return request<{ id: string; channels: string[]; bridge_type: string; video_mode?: string }>(
     `/bridges/${bridgeId}`
   );
+}
+
+/**
+ * listBridges — возвращает активные мосты.
+ * Если ARI вернул не массив, результат пустой.
+ *
+ * @returns активные мосты
+ */
+export async function listBridges() {
+  const bridges = await request<{ id: string; channels: string[]; creationtime: string }[]>("/bridges");
+  return Array.isArray(bridges) ? bridges : [];
 }
 
 /**
